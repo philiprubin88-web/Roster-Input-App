@@ -21,6 +21,7 @@
   --danger: #F85149;
   --success: #3FB950;
   --warn: #D29922;
+  --warn-dim: rgba(210,153,34,0.12);
   --radius: 7px;
   --radius-lg: 11px;
   --tr: 180ms ease;
@@ -44,15 +45,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 .btn-ghost:hover{color:var(--text);border-color:var(--border-2);background:var(--border)}
 .btn-primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
 .btn-primary:hover{background:#79B8FF;border-color:#79B8FF}
-.btn-primary:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary:disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
+.btn-danger{background:rgba(248,81,73,.15);color:var(--danger);border-color:rgba(248,81,73,.3);font-weight:500}
+.btn-danger:hover{background:rgba(248,81,73,.25);border-color:var(--danger)}
 .btn-icon{background:none;border:1px solid transparent;color:var(--text-muted);padding:6px;border-radius:var(--radius);cursor:pointer;font-size:16px;transition:all var(--tr);display:flex;align-items:center;justify-content:center;width:32px;height:32px}
 .btn-icon:hover{color:var(--text);background:var(--surface-2);border-color:var(--border)}
 .gcal-indicator{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);transition:background .3s}
 .dot.on{background:var(--success)}
+.dot.warn{background:var(--warn)}
+
+/* offline banner */
+.offline-banner{display:none;align-items:center;gap:8px;background:rgba(210,153,34,.15);border-bottom:1px solid rgba(210,153,34,.3);padding:6px 20px;font-size:11px;color:var(--warn);flex-shrink:0}
+.offline-banner.show{display:flex}
 
 /* ── LAYOUT ── */
-.layout{display:flex;height:calc(100vh - 52px);overflow:hidden}
+.layout{display:flex;overflow:hidden;flex:1}
+.app-wrap{display:flex;flex-direction:column;height:100vh}
 .cal-wrap{flex:1;overflow-y:auto;padding:18px 20px}
 
 /* ── SUMMARY SIDEBAR ── */
@@ -80,11 +89,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 .day-num{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--text-muted);display:flex;align-items:center;gap:5px}
 .today .day-num{color:var(--accent)}
 .today-pip{width:4px;height:4px;border-radius:50%;background:var(--accent)}
-.shift-chip{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,0,0,.35);margin-top:2px;overflow:hidden;flex-shrink:0}
+.shift-chip{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,0,0,.35);margin-top:2px;overflow:hidden;flex-shrink:0;flex-wrap:wrap}
 .chip-dot{width:5px;height:5px;border-radius:1px;flex-shrink:0}
 .chip-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
-.chip-time{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--text-muted);display:block;margin-top:1px}
+.chip-time{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--text-muted);display:block;margin-top:1px;width:100%}
+/* FIX 12: Sync status badges */
 .chip-synced{font-size:8px;background:var(--success);color:#000;border-radius:2px;padding:1px 4px;font-weight:700;font-family:'IBM Plex Mono',monospace;margin-left:auto;flex-shrink:0}
+.chip-pending{font-size:8px;background:var(--warn-dim);color:var(--warn);border:1px solid rgba(210,153,34,.4);border-radius:2px;padding:1px 4px;font-weight:700;font-family:'IBM Plex Mono',monospace;margin-left:auto;flex-shrink:0}
+/* FIX 4: details note indicator */
+.chip-note{font-size:8px;color:var(--text-muted);margin-left:2px;flex-shrink:0}
 .cell-hint{font-size:9px;color:var(--text-dim);font-style:italic;margin-top:auto;opacity:0;transition:opacity var(--tr)}
 .day-cell:hover .cell-hint{opacity:1}
 
@@ -123,9 +136,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 .fl{font-size:10px;color:var(--text-muted);font-weight:500}
 .fi{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:7px 9px;width:100%;transition:border-color var(--tr);outline:none}
 .fi:focus{border-color:var(--accent)}
+.fi.error{border-color:var(--danger)}
 .fi::placeholder{color:var(--text-dim)}
 textarea.fi{resize:vertical;min-height:56px}
 .time-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+/* FIX 3: Validation error */
+.field-error{font-size:9px;color:var(--danger);margin-top:2px;display:none}
+.field-error.show{display:block}
 
 .d-footer{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:7px;flex-shrink:0}
 .btn-del{background:none;border:1px solid var(--border);color:var(--danger);padding:7px 11px;border-radius:var(--radius);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;transition:all var(--tr)}
@@ -160,8 +177,6 @@ textarea.fi{resize:vertical;min-height:56px}
 
 /* edit form */
 .edit-form{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-top:10px}
-.edit-form .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.edit-form .form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .edit-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-muted);cursor:pointer}
 .edit-check input{accent-color:var(--accent)}
 
@@ -175,7 +190,7 @@ textarea.fi{resize:vertical;min-height:56px}
 .info-box code{font-family:'IBM Plex Mono',monospace;background:rgba(88,166,255,.1);padding:1px 5px;border-radius:3px;font-size:10px}
 
 /* sync modal */
-.sync-modal{width:420px}
+.sync-modal{width:440px}
 .sync-opt{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border:1.5px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all var(--tr);margin-bottom:7px}
 .sync-opt:hover,.sync-opt.sel{border-color:var(--accent);background:var(--accent-dim)}
 .sync-opt input[type="radio"]{accent-color:var(--accent);flex-shrink:0;margin-top:2px}
@@ -184,12 +199,25 @@ textarea.fi{resize:vertical;min-height:56px}
 .progress-bar{width:100%;height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin:10px 0}
 .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width 200ms ease;width:0}
 
+/* warn box */
+.warn-box{background:var(--warn-dim);border:1px solid rgba(210,153,34,.3);border-radius:var(--radius);padding:10px 12px;font-size:11px;color:var(--warn);margin-bottom:12px;line-height:1.5}
+
+/* ── CONFIRM DIALOG ── */
+.confirm-wrap{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tr)}
+.confirm-wrap.open{opacity:1;pointer-events:all}
+.confirm-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;width:340px;max-width:90vw;transform:scale(.96);transition:transform 200ms cubic-bezier(.16,1,.3,1)}
+.confirm-wrap.open .confirm-box{transform:scale(1)}
+.confirm-title{font-weight:600;font-size:14px;margin-bottom:8px}
+.confirm-msg{font-size:12px;color:var(--text-muted);margin-bottom:18px;line-height:1.6}
+.confirm-actions{display:flex;gap:8px;justify-content:flex-end}
+
 /* ── TOAST ── */
 .toasts{position:fixed;bottom:20px;right:20px;z-index:500;display:flex;flex-direction:column;gap:7px;pointer-events:none}
 .toast{display:flex;align-items:center;gap:9px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text);min-width:190px;max-width:300px;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:tIn .18s ease;pointer-events:all}
 .toast.success{border-left:3px solid var(--success)}
 .toast.error{border-left:3px solid var(--danger)}
 .toast.info{border-left:3px solid var(--accent)}
+.toast.warn{border-left:3px solid var(--warn)}
 @keyframes tIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
 
 /* ── MISC ── */
@@ -198,17 +226,19 @@ textarea.fi{resize:vertical;min-height:56px}
 ::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:3px}
 input[type="checkbox"]{accent-color:var(--accent)}
 .divider{border:none;border-top:1px solid var(--border);margin:14px 0}
-.mt8{margin-top:8px}
 .gap7{display:flex;flex-direction:column;gap:7px}
 .flex-row{display:flex;align-items:center;gap:8px}
-.flex1{flex:1}
 .text-muted{color:var(--text-muted)}
 .text-sm{font-size:11px}
-.fw6{font-weight:600}
-.mono{font-family:'IBM Plex Mono',monospace}
 </style>
 </head>
 <body>
+<div class="app-wrap">
+
+<!-- FIX 11: Offline banner -->
+<div class="offline-banner" id="offlineBanner">
+  ⚠ No internet connection — Google Calendar sync is unavailable
+</div>
 
 <!-- TOP BAR -->
 <div class="topbar">
@@ -224,6 +254,9 @@ input[type="checkbox"]{accent-color:var(--accent)}
   </div>
 
   <button class="btn btn-ghost" onclick="goToday()">Today</button>
+
+  <!-- FIX 9: Clear month button -->
+  <button class="btn btn-ghost" onclick="clearMonth()" title="Remove all shifts from this month" style="color:var(--danger);border-color:rgba(248,81,73,.2)">Clear Month</button>
 
   <div class="gcal-indicator" id="gcalIndicator">
     <div class="dot" id="gcalDot"></div>
@@ -248,6 +281,8 @@ input[type="checkbox"]{accent-color:var(--accent)}
     <div id="summaryContent"></div>
   </div>
 </div>
+
+</div><!-- end app-wrap -->
 
 <!-- DRAWER OVERLAY -->
 <div class="overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
@@ -275,12 +310,14 @@ input[type="checkbox"]{accent-color:var(--accent)}
         <div class="fl">Partner / Colleague</div>
         <input class="fi" id="inPartner" type="text" placeholder="Name…">
       </div>
+      <!-- FIX 3: Modified hours with validation -->
       <div class="fg">
-        <div class="fl">Modified Hours</div>
+        <div class="fl">Modified Hours <span style="color:var(--text-dim)">(overrides shift default)</span></div>
         <div class="time-row">
-          <input class="fi" id="inStart" type="time" title="Override start time">
-          <input class="fi" id="inEnd" type="time" title="Override end time">
+          <input class="fi" id="inStart" type="time" title="Override start time" oninput="validateTimes()">
+          <input class="fi" id="inEnd" type="time" title="Override end time" oninput="validateTimes()">
         </div>
+        <div class="field-error" id="timeError">End time cannot equal start time. Tick "overnight" in shift settings if this crosses midnight.</div>
         <div style="font-size:9px;color:var(--text-muted);margin-top:3px">Leave blank to use shift defaults</div>
       </div>
       <div class="fg">
@@ -362,6 +399,18 @@ input[type="checkbox"]{accent-color:var(--accent)}
   </div>
 </div>
 
+<!-- FIX: Confirm dialog -->
+<div class="confirm-wrap" id="confirmWrap">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirmTitle">Are you sure?</div>
+    <div class="confirm-msg" id="confirmMsg"></div>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" onclick="confirmResolve(false)">Cancel</button>
+      <button class="btn btn-danger" id="confirmOkBtn" onclick="confirmResolve(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST CONTAINER -->
 <div class="toasts" id="toasts"></div>
 
@@ -382,7 +431,7 @@ const DEFAULT_SHIFTS = [
   { id:'lv', name:'Leave',       color:'#84CC16', start:null,    end:null,    overnight:false, allDay:true  },
 ];
 
-const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const DAYS   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 // ═══════════════════════════════════════════════════
@@ -393,7 +442,7 @@ let state = {
   month: new Date().getMonth(),
   selectedDate: null,
   shiftTypes: [],
-  roster: {},          // 'YYYY-MM-DD': { shiftTypeId, partner, modStart, modEnd, notes, gcalEventId }
+  roster: {},
   gcalClientId: '',
   gcalCalendarId: 'primary',
   accessToken: null,
@@ -406,21 +455,56 @@ let state = {
 // PERSISTENCE
 // ═══════════════════════════════════════════════════
 function save() {
-  localStorage.setItem('rs_roster', JSON.stringify(state.roster));
-  localStorage.setItem('rs_shifts', JSON.stringify(state.shiftTypes));
+  localStorage.setItem('rs_roster',      JSON.stringify(state.roster));
+  localStorage.setItem('rs_shifts',      JSON.stringify(state.shiftTypes));
   localStorage.setItem('rs_gcal_client', state.gcalClientId);
-  localStorage.setItem('rs_gcal_cal', state.gcalCalendarId);
-  localStorage.setItem('rs_summary', state.summaryVisible ? '1' : '0');
+  localStorage.setItem('rs_gcal_cal',    state.gcalCalendarId);
+  localStorage.setItem('rs_summary',     state.summaryVisible ? '1' : '0');
 }
 
 function load() {
   try { state.roster = JSON.parse(localStorage.getItem('rs_roster')) || {}; } catch(e) { state.roster = {}; }
-  try { state.shiftTypes = JSON.parse(localStorage.getItem('rs_shifts')) || DEFAULT_SHIFTS; } catch(e) { state.shiftTypes = DEFAULT_SHIFTS; }
-  if (!state.shiftTypes.length) state.shiftTypes = DEFAULT_SHIFTS;
-  state.gcalClientId = localStorage.getItem('rs_gcal_client') || '';
+  try { state.shiftTypes = JSON.parse(localStorage.getItem('rs_shifts')); if (!state.shiftTypes?.length) state.shiftTypes = DEFAULT_SHIFTS; } catch(e) { state.shiftTypes = DEFAULT_SHIFTS; }
+  state.gcalClientId   = localStorage.getItem('rs_gcal_client') || '';
   state.gcalCalendarId = localStorage.getItem('rs_gcal_cal') || 'primary';
   state.summaryVisible = localStorage.getItem('rs_summary') === '1';
 }
+
+// ═══════════════════════════════════════════════════
+// FIX 11: OFFLINE DETECTION
+// ═══════════════════════════════════════════════════
+function updateOnlineStatus() {
+  const banner = document.getElementById('offlineBanner');
+  if (!navigator.onLine) {
+    banner.classList.add('show');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+window.addEventListener('online',  updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
+// ═══════════════════════════════════════════════════
+// FIX 1: TOKEN EXPIRY — check & auto-prompt
+// ═══════════════════════════════════════════════════
+function isTokenValid() {
+  return !!(state.accessToken && state.tokenExpiry && Date.now() < state.tokenExpiry);
+}
+
+function checkTokenAndPrompt() {
+  // If we have a client ID but token is expired/missing, show a gentle indicator
+  if (state.gcalClientId && !isTokenValid()) {
+    const dot = document.getElementById('gcalDot');
+    if (dot) dot.classList.add('warn');
+    document.getElementById('gcalLabel').textContent = 'Token expired';
+  }
+}
+
+// Periodically check token validity
+setInterval(() => {
+  updateGcalStatusUI();
+  checkTokenAndPrompt();
+}, 30000);
 
 // ═══════════════════════════════════════════════════
 // CALENDAR RENDER
@@ -429,7 +513,6 @@ function renderCalendar() {
   const grid = document.getElementById('calGrid');
   grid.innerHTML = '';
 
-  // Header row
   DAYS.forEach(d => {
     const hdr = document.createElement('div');
     hdr.className = 'day-hdr';
@@ -438,17 +521,15 @@ function renderCalendar() {
   });
 
   const y = state.year, m = state.month;
-  const firstDay = new Date(y, m, 1);
-  const lastDay  = new Date(y, m + 1, 0);
-  const today    = new Date();
-
-  // Day of week: Mon=0 … Sun=6
-  let startDow = (firstDay.getDay() + 6) % 7; // convert Sun=0 to Mon=0
-  let totalCells = Math.ceil((startDow + lastDay.getDate()) / 7) * 7;
+  const firstDay  = new Date(y, m, 1);
+  const lastDay   = new Date(y, m + 1, 0);
+  const today     = new Date();
+  let startDow    = (firstDay.getDay() + 6) % 7;
+  let totalCells  = Math.ceil((startDow + lastDay.getDate()) / 7) * 7;
 
   for (let i = 0; i < totalCells; i++) {
     const dayNum = i - startDow + 1;
-    const cell = document.createElement('div');
+    const cell   = document.createElement('div');
     cell.className = 'day-cell';
 
     if (dayNum < 1 || dayNum > lastDay.getDate()) {
@@ -461,30 +542,37 @@ function renderCalendar() {
     const isToday = today.getFullYear()===y && today.getMonth()===m && today.getDate()===dayNum;
     if (isToday) cell.classList.add('today');
     if (state.selectedDate === dateStr) cell.classList.add('selected');
-
     cell.onclick = () => openDrawer(dateStr);
 
-    // Day number
     const numEl = document.createElement('div');
     numEl.className = 'day-num';
     if (isToday) numEl.innerHTML = `<span class="today-pip"></span>${dayNum}`;
     else numEl.textContent = dayNum;
     cell.appendChild(numEl);
 
-    // Shift chip
     const entry = state.roster[dateStr];
-    if (entry) {
+    if (entry && entry.shiftTypeId) {
       const st = state.shiftTypes.find(s => s.id === entry.shiftTypeId);
       if (st) {
         const chip = document.createElement('div');
         chip.className = 'shift-chip';
+
+        // FIX 12: Show synced vs unsynced badge
+        const syncBadge = entry.gcalEventId
+          ? `<span class="chip-synced">GCal ✓</span>`
+          : (state.gcalClientId ? `<span class="chip-pending">⬆ Pending</span>` : '');
+
+        // FIX 4 (note indicator): Show indicator if notes/partner exist
+        const hasDetails = entry.partner || entry.notes;
+        const noteIndicator = hasDetails ? `<span class="chip-note" title="${entry.partner ? 'Partner: '+entry.partner : ''}${entry.notes ? '\n'+entry.notes : ''}">✎</span>` : '';
+
         chip.innerHTML = `
           <span class="chip-dot" style="background:${st.color}"></span>
           <span class="chip-label" style="color:${st.color}">${st.name}</span>
-          ${entry.gcalEventId ? '<span class="chip-synced">GCal</span>' : ''}
+          ${syncBadge}${noteIndicator}
         `;
         const timeStr = entry.modStart || st.start;
-        if (timeStr) {
+        if (timeStr && !st.allDay) {
           const timeSpan = document.createElement('span');
           timeSpan.className = 'chip-time';
           timeSpan.textContent = formatTime(entry.modStart || st.start) + ' – ' + formatTime(entry.modEnd || st.end);
@@ -510,11 +598,15 @@ function formatTime(t) {
   if (!t) return '';
   const [h, mi] = t.split(':').map(Number);
   const ampm = h >= 12 ? 'pm' : 'am';
-  const h12 = h % 12 || 12;
+  const h12  = h % 12 || 12;
   return `${h12}:${String(mi).padStart(2,'0')}${ampm}`;
 }
 
+// FIX 4: Close drawer before navigating months
 function prevMonth() {
+  if (document.getElementById('drawer').classList.contains('open')) {
+    closeDrawerSilent();
+  }
   if (state.month === 0) { state.month = 11; state.year--; }
   else state.month--;
   state.selectedDate = null;
@@ -522,6 +614,9 @@ function prevMonth() {
 }
 
 function nextMonth() {
+  if (document.getElementById('drawer').classList.contains('open')) {
+    closeDrawerSilent();
+  }
   if (state.month === 11) { state.month = 0; state.year++; }
   else state.month++;
   state.selectedDate = null;
@@ -530,9 +625,16 @@ function nextMonth() {
 
 function goToday() {
   const now = new Date();
-  state.year = now.getFullYear();
+  state.year  = now.getFullYear();
   state.month = now.getMonth();
   renderCalendar();
+}
+
+// Close drawer without triggering renderCalendar (for internal use)
+function closeDrawerSilent() {
+  document.getElementById('drawerOverlay').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+  state.selectedDate = null;
 }
 
 // ═══════════════════════════════════════════════════
@@ -541,17 +643,23 @@ function goToday() {
 function openDrawer(dateStr) {
   state.selectedDate = dateStr;
   renderCalendar();
+  populateDrawer(dateStr);
+  document.getElementById('drawerOverlay').classList.add('open');
+  document.getElementById('drawer').classList.add('open');
+}
 
+// FIX 8: Separated drawer population so it can be called after settings change
+function populateDrawer(dateStr) {
+  if (!dateStr) return;
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m-1, d);
-  document.getElementById('drawerDate').textContent = `${d} ${MONTHS[m-1]} ${y}`;
+  document.getElementById('drawerDate').textContent   = `${d} ${MONTHS[m-1]} ${y}`;
   document.getElementById('drawerWeekday').textContent = dt.toLocaleDateString('en-AU', {weekday:'long'});
 
-  // Populate shift buttons
   const sbContainer = document.getElementById('shiftButtons');
   sbContainer.innerHTML = '';
   state.shiftTypes.forEach(st => {
-    const btn = document.createElement('button');
+    const btn     = document.createElement('button');
     btn.className = 's-btn';
     btn.style.setProperty('--sc', st.color);
     const entry = state.roster[dateStr];
@@ -566,23 +674,21 @@ function openDrawer(dateStr) {
     sbContainer.appendChild(btn);
   });
 
-  // Load existing entry details
   const entry = state.roster[dateStr];
-  document.getElementById('inPartner').value = entry?.partner || '';
+  document.getElementById('inPartner').value = entry?.partner  || '';
   document.getElementById('inStart').value   = entry?.modStart || '';
-  document.getElementById('inEnd').value     = entry?.modEnd || '';
-  document.getElementById('inNotes').value   = entry?.notes || '';
-  document.getElementById('deleteBtn').style.display = entry ? '' : 'none';
+  document.getElementById('inEnd').value     = entry?.modEnd   || '';
+  document.getElementById('inNotes').value   = entry?.notes    || '';
+  document.getElementById('deleteBtn').style.display = entry?.shiftTypeId ? '' : 'none';
+  document.getElementById('timeError').classList.remove('show');
+  document.getElementById('inStart').classList.remove('error');
+  document.getElementById('inEnd').classList.remove('error');
 
-  // Close details by default unless there's existing detail content
   const hasDetails = entry && (entry.partner || entry.modStart || entry.modEnd || entry.notes);
-  const tog = document.getElementById('detailsTog');
+  const tog  = document.getElementById('detailsTog');
   const body = document.getElementById('detailsBody');
-  if (hasDetails) { tog.classList.add('open'); body.classList.add('open'); }
-  else { tog.classList.remove('open'); body.classList.remove('open'); }
-
-  document.getElementById('drawerOverlay').classList.add('open');
-  document.getElementById('drawer').classList.add('open');
+  if (hasDetails) { tog.classList.add('open');  body.classList.add('open');  }
+  else            { tog.classList.remove('open'); body.classList.remove('open'); }
 }
 
 function closeDrawer() {
@@ -595,16 +701,14 @@ function closeDrawer() {
 function selectShiftType(id, dateStr) {
   const date = dateStr || state.selectedDate;
   if (!date) return;
-  // Toggle off if already selected
   const entry = state.roster[date];
   if (entry && entry.shiftTypeId === id) {
-    // deselect
     document.querySelectorAll('.s-btn').forEach(b => b.classList.remove('active'));
     if (state.roster[date]) state.roster[date].shiftTypeId = null;
   } else {
     document.querySelectorAll('.s-btn').forEach(b => b.classList.remove('active'));
-    const btns = document.querySelectorAll('.s-btn');
     const idx = state.shiftTypes.findIndex(s => s.id === id);
+    const btns = document.querySelectorAll('.s-btn');
     if (btns[idx]) btns[idx].classList.add('active');
     if (!state.roster[date]) state.roster[date] = {};
     state.roster[date].shiftTypeId = id;
@@ -613,34 +717,53 @@ function selectShiftType(id, dateStr) {
 }
 
 function toggleDetails() {
-  const tog = document.getElementById('detailsTog');
-  const body = document.getElementById('detailsBody');
-  tog.classList.toggle('open');
-  body.classList.toggle('open');
+  document.getElementById('detailsTog').classList.toggle('open');
+  document.getElementById('detailsBody').classList.toggle('open');
+}
+
+// FIX 3: Time validation
+function validateTimes() {
+  const start = document.getElementById('inStart').value;
+  const end   = document.getElementById('inEnd').value;
+  const err   = document.getElementById('timeError');
+
+  if (start && end && start === end) {
+    err.classList.add('show');
+    document.getElementById('inStart').classList.add('error');
+    document.getElementById('inEnd').classList.add('error');
+    return false;
+  }
+  err.classList.remove('show');
+  document.getElementById('inStart').classList.remove('error');
+  document.getElementById('inEnd').classList.remove('error');
+  return true;
 }
 
 function saveEntry() {
   const date = state.selectedDate;
   if (!date) return;
 
+  // FIX 3: Validate before saving
+  if (!validateTimes()) {
+    toast('Please fix the time error before saving', 'error');
+    return;
+  }
+
   const shiftTypeId = state.roster[date]?.shiftTypeId;
   if (!shiftTypeId) {
-    // Clear entry if no shift selected
     const gcalEventId = state.roster[date]?.gcalEventId;
     if (gcalEventId) { state.roster[date] = { gcalEventId }; }
     else delete state.roster[date];
-    save();
-    closeDrawer();
-    return;
+    save(); closeDrawer(); return;
   }
 
   const existing = state.roster[date] || {};
   state.roster[date] = {
     shiftTypeId,
-    partner:  document.getElementById('inPartner').value.trim(),
-    modStart: document.getElementById('inStart').value,
-    modEnd:   document.getElementById('inEnd').value,
-    notes:    document.getElementById('inNotes').value.trim(),
+    partner:     document.getElementById('inPartner').value.trim(),
+    modStart:    document.getElementById('inStart').value,
+    modEnd:      document.getElementById('inEnd').value,
+    notes:       document.getElementById('inNotes').value.trim(),
     gcalEventId: existing.gcalEventId || null,
   };
 
@@ -653,14 +776,34 @@ function deleteEntry() {
   const date = state.selectedDate;
   if (!date) return;
   const gcalEventId = state.roster[date]?.gcalEventId;
-  // Optionally remove from GCal too
-  if (gcalEventId && state.accessToken && isTokenValid()) {
+  if (gcalEventId && isTokenValid()) {
     deleteGcalEvent(gcalEventId).catch(() => {});
   }
   delete state.roster[date];
   save();
   closeDrawer();
   toast('Shift removed', 'info');
+}
+
+// ═══════════════════════════════════════════════════
+// FIX 9: CLEAR MONTH
+// ═══════════════════════════════════════════════════
+async function clearMonth() {
+  const y = state.year, m = state.month;
+  const prefix    = `${y}-${String(m+1).padStart(2,'0')}-`;
+  const monthKeys = Object.keys(state.roster).filter(k => k.startsWith(prefix));
+  if (!monthKeys.length) { toast('No shifts in this month to clear', 'info'); return; }
+
+  const confirmed = await confirm2(
+    `Clear ${MONTHS[m]} ${y}?`,
+    `This will remove all ${monthKeys.length} shift${monthKeys.length!==1?'s':''} from this month. Google Calendar events will NOT be deleted — only local data is cleared.`
+  );
+  if (!confirmed) return;
+
+  monthKeys.forEach(k => delete state.roster[k]);
+  save();
+  renderCalendar();
+  toast(`Cleared ${monthKeys.length} shift${monthKeys.length!==1?'s':''}`, 'info');
 }
 
 // ═══════════════════════════════════════════════════
@@ -676,7 +819,7 @@ function toggleSummary() {
 
 function renderSummary() {
   const y = state.year, m = state.month;
-  const prefix = `${y}-${String(m+1).padStart(2,'0')}-`;
+  const prefix       = `${y}-${String(m+1).padStart(2,'0')}-`;
   const monthEntries = Object.entries(state.roster).filter(([k]) => k.startsWith(prefix));
 
   let totalShifts = 0, totalHours = 0, rdo = 0, leave = 0;
@@ -686,21 +829,20 @@ function renderSummary() {
     if (!entry.shiftTypeId) return;
     const st = state.shiftTypes.find(s => s.id === entry.shiftTypeId);
     if (!st) return;
-
-    if (st.id === 'rd') { rdo++; return; }
+    if (st.id === 'rd') { rdo++;   return; }
     if (st.id === 'lv') { leave++; return; }
-
     totalShifts++;
     byType[st.id] = (byType[st.id] || 0) + 1;
 
-    // Calc hours
+    // FIX 10: Correct overnight hour calculation (cap at 24h max)
     const sTime = entry.modStart || st.start;
     const eTime = entry.modEnd   || st.end;
     if (sTime && eTime) {
       const [sh, sm] = sTime.split(':').map(Number);
       const [eh, em] = eTime.split(':').map(Number);
       let mins = (eh*60+em) - (sh*60+sm);
-      if (mins <= 0) mins += 24*60;
+      if (mins <= 0) mins += 24*60;      // overnight shift
+      if (mins > 24*60) mins = 24*60;    // cap at 24h (guard against bad data)
       totalHours += mins / 60;
     }
   });
@@ -745,8 +887,8 @@ let activeTab = 'shifts';
 function openSettings() {
   document.getElementById('settingsModal').classList.add('open');
   document.getElementById('thisOrigin').textContent = window.location.origin;
-  document.getElementById('inClientId').value = state.gcalClientId;
-  document.getElementById('inCalendarId').value = state.gcalCalendarId || 'primary';
+  document.getElementById('inClientId').value    = state.gcalClientId;
+  document.getElementById('inCalendarId').value  = state.gcalCalendarId || 'primary';
   renderShiftList();
   updateGcalStatusUI();
   switchTab('shifts');
@@ -756,6 +898,11 @@ function closeSettings() {
   document.getElementById('settingsModal').classList.remove('open');
   state.editingShiftId = null;
   document.getElementById('editFormContainer').innerHTML = '';
+  // FIX 8: Refresh drawer shift buttons if drawer is open
+  if (state.selectedDate && document.getElementById('drawer').classList.contains('open')) {
+    populateDrawer(state.selectedDate);
+  }
+  renderCalendar();
 }
 
 function switchTab(tab) {
@@ -772,7 +919,7 @@ function renderShiftList() {
   const list = document.getElementById('stypeList');
   list.innerHTML = '';
   state.shiftTypes.forEach(st => {
-    const item = document.createElement('div');
+    const item    = document.createElement('div');
     item.className = 'stype-item';
     const timeStr = st.allDay ? 'All Day' : (st.start && st.end ? `${st.start}–${st.end}` : '');
     item.innerHTML = `
@@ -811,7 +958,7 @@ function showEditForm(st) {
   const c = document.getElementById('editFormContainer');
   c.innerHTML = `
     <div class="edit-form">
-      <div class="edit-form .form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div class="fg">
           <div class="fl">Name</div>
           <input class="fi" id="ef-name" type="text" value="${st.name}" placeholder="e.g. Late Shift">
@@ -851,12 +998,12 @@ function toggleAlldayInputs(cb) {
 }
 
 function saveShiftEdit() {
-  const name    = document.getElementById('ef-name').value.trim();
-  const color   = document.getElementById('ef-color').value;
-  const start   = document.getElementById('ef-start').value;
-  const end     = document.getElementById('ef-end').value;
-  const allDay  = document.getElementById('ef-allday').checked;
-  if (!name) { toast('Name is required','error'); return; }
+  const name   = document.getElementById('ef-name').value.trim();
+  const color  = document.getElementById('ef-color').value;
+  const start  = document.getElementById('ef-start').value;
+  const end    = document.getElementById('ef-end').value;
+  const allDay = document.getElementById('ef-allday').checked;
+  if (!name) { toast('Name is required', 'error'); return; }
 
   const overnight = !allDay && start && end && (() => {
     const [sh,sm] = start.split(':').map(Number);
@@ -865,18 +1012,15 @@ function saveShiftEdit() {
   })();
 
   if (state.editingShiftId === '__new__') {
-    const id = 'st_' + Date.now();
-    state.shiftTypes.push({ id, name, color, start: allDay ? null : start, end: allDay ? null : end, overnight:!!overnight, allDay });
+    state.shiftTypes.push({ id:'st_'+Date.now(), name, color, start:allDay?null:start, end:allDay?null:end, overnight:!!overnight, allDay });
   } else {
     const st = state.shiftTypes.find(s => s.id === state.editingShiftId);
-    if (st) Object.assign(st, { name, color, start: allDay ? null : start, end: allDay ? null : end, overnight:!!overnight, allDay });
+    if (st) Object.assign(st, { name, color, start:allDay?null:start, end:allDay?null:end, overnight:!!overnight, allDay });
   }
 
   state.editingShiftId = null;
   document.getElementById('editFormContainer').innerHTML = '';
-  save();
-  renderShiftList();
-  renderCalendar();
+  save(); renderShiftList(); renderCalendar();
   toast('Shift type saved', 'success');
 }
 
@@ -885,12 +1029,20 @@ function cancelShiftEdit() {
   document.getElementById('editFormContainer').innerHTML = '';
 }
 
-function deleteShift(id) {
-  if (!confirm('Delete this shift type? Any roster entries using it will lose their type.')) return;
+// FIX 6: Warn about affected days when deleting a shift type
+async function deleteShift(id) {
+  const affectedDays = Object.values(state.roster).filter(e => e.shiftTypeId === id).length;
+  const st = state.shiftTypes.find(s => s.id === id);
+  const msg = affectedDays > 0
+    ? `This will permanently delete "${st?.name}". It is currently assigned to ${affectedDays} day${affectedDays!==1?'s':''} — those entries will lose their shift type.`
+    : `This will permanently delete "${st?.name}". No roster days use this shift type.`;
+
+  const confirmed = await confirm2('Delete shift type?', msg);
+  if (!confirmed) return;
+
   state.shiftTypes = state.shiftTypes.filter(s => s.id !== id);
-  save();
-  renderShiftList();
-  renderCalendar();
+  save(); renderShiftList(); renderCalendar();
+  toast('Shift type deleted', 'info');
 }
 
 function saveGcalSettings() {
@@ -905,8 +1057,7 @@ function saveGcalSettings() {
 let tokenClient = null;
 
 function initGcal() {
-  if (!state.gcalClientId) return;
-  if (typeof google === 'undefined') return;
+  if (!state.gcalClientId || typeof google === 'undefined') return;
   try {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: state.gcalClientId,
@@ -922,10 +1073,6 @@ function handleToken(response) {
   state.tokenExpiry = Date.now() + (response.expires_in - 60) * 1000;
   updateGcalStatusUI();
   toast('Connected to Google Calendar', 'success');
-}
-
-function isTokenValid() {
-  return state.accessToken && state.tokenExpiry && Date.now() < state.tokenExpiry;
 }
 
 function connectGcal() {
@@ -948,25 +1095,48 @@ function disconnectGcal() {
 }
 
 function updateGcalStatusUI() {
-  const on = isTokenValid();
+  const on      = isTokenValid();
+  const expired = state.gcalClientId && !on;
   ['gcalDot','settingsDot'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.classList.toggle('on', on);
+    if (!el) return;
+    el.classList.toggle('on',   on);
+    el.classList.toggle('warn', !on && expired);
   });
-  document.getElementById('gcalLabel').textContent = on ? 'Connected' : 'Not connected';
+  document.getElementById('gcalLabel').textContent = on ? 'Connected' : (expired ? 'Token expired — reconnect' : 'Not connected');
   const sl = document.getElementById('settingsGcalLabel');
-  if (sl) sl.textContent = on ? 'Connected to Google Calendar' : 'Not connected to Google Calendar';
+  if (sl) sl.textContent = on ? 'Connected to Google Calendar' : (expired ? 'Session expired — click Connect to refresh' : 'Not connected');
 }
 
+// FIX 1 + 2: Smarter gcalRequest — handle 401 (token expired) and 404/410 (event deleted)
 async function gcalRequest(method, path, body) {
+  // FIX 1: Check token before request
+  if (!isTokenValid() && method !== 'DELETE') {
+    toast('Google session expired — please reconnect in Settings', 'warn');
+    updateGcalStatusUI();
+    throw new Error('TOKEN_EXPIRED');
+  }
+
   const calId = encodeURIComponent(state.gcalCalendarId || 'primary');
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events${path}`;
-  const opts = {
-    method,
-    headers: { 'Authorization': `Bearer ${state.accessToken}`, 'Content-Type': 'application/json' },
-  };
+  const url   = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events${path}`;
+  const opts  = { method, headers: { 'Authorization': `Bearer ${state.accessToken}`, 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
+
   const res = await fetch(url, opts);
+
+  // FIX 1: Handle 401 explicitly
+  if (res.status === 401) {
+    state.accessToken = null;
+    state.tokenExpiry = null;
+    updateGcalStatusUI();
+    throw new Error('TOKEN_EXPIRED');
+  }
+
+  // FIX 2: Handle 404/410 (event was deleted from GCal)
+  if (res.status === 404 || res.status === 410) {
+    throw new Error('EVENT_NOT_FOUND');
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || `HTTP ${res.status}`);
@@ -974,13 +1144,27 @@ async function gcalRequest(method, path, body) {
   return method === 'DELETE' ? null : res.json();
 }
 
+// FIX 7: Search GCal for existing event on a date to avoid duplicates
+async function findExistingGcalEvent(dateStr, title) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dayStart  = new Date(y, m-1, d, 0, 0, 0).toISOString();
+  const dayEnd    = new Date(y, m-1, d, 23, 59, 59).toISOString();
+  const calId     = encodeURIComponent(state.gcalCalendarId || 'primary');
+  const url       = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${dayStart}&timeMax=${dayEnd}&q=${encodeURIComponent(title)}&singleEvents=true`;
+  const res       = await fetch(url, { headers: { 'Authorization': `Bearer ${state.accessToken}` } });
+  if (!res.ok) return null;
+  const data      = await res.json();
+  const match     = (data.items || []).find(e => e.summary === title);
+  return match?.id || null;
+}
+
 function buildEvent(dateStr, entry) {
   const st = state.shiftTypes.find(s => s.id === entry.shiftTypeId);
   if (!st) return null;
 
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const startTime = entry.modStart || st.start;
-  const endTime   = entry.modEnd   || st.end;
+  const [y, m, d]  = dateStr.split('-').map(Number);
+  const startTime   = entry.modStart || st.start;
+  const endTime     = entry.modEnd   || st.end;
 
   let descParts = [];
   if (entry.partner) descParts.push('Partner: ' + entry.partner);
@@ -988,78 +1172,87 @@ function buildEvent(dateStr, entry) {
   if (entry.notes) descParts.push(entry.notes);
 
   if (st.allDay || !startTime || !endTime) {
-    // All-day event
-    const start = dateStr;
     const nextDay = new Date(y, m-1, d+1);
-    const end = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`;
-    return {
-      summary: st.name,
-      description: descParts.join('\n'),
-      start: { date: start },
-      end:   { date: end },
-    };
+    const end     = `${nextDay.getFullYear()}-${String(nextDay.getMonth()+1).padStart(2,'0')}-${String(nextDay.getDate()).padStart(2,'0')}`;
+    return { summary: st.name, description: descParts.join('\n') || undefined, start: { date: dateStr }, end: { date: end } };
   }
 
-  // Timed event
   const pad = n => String(n).padStart(2,'0');
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
+  const startDt  = new Date(y, m-1, d, sh, sm);
+  let   endDt    = new Date(y, m-1, d, eh, em);
+  if (st.overnight || (eh*60+em) <= (sh*60+sm)) endDt.setDate(endDt.getDate() + 1);
 
-  const startDt = new Date(y, m-1, d, sh, sm);
-  let endDt     = new Date(y, m-1, d, eh, em);
-  if (st.overnight || (eh*60+em) < (sh*60+sm)) endDt.setDate(endDt.getDate() + 1);
-
-  const fmtDt = dt =>
-    `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
-
-  // Use Australian Eastern time
+  const fmtDt = dt => `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
   const tz = 'Australia/Sydney';
   return {
-    summary: st.name,
+    summary:     st.name,
     description: descParts.join('\n') || undefined,
     start: { dateTime: fmtDt(startDt), timeZone: tz },
     end:   { dateTime: fmtDt(endDt),   timeZone: tz },
   };
 }
 
+// FIX 2 + 5 + 7: Smarter syncEntries
 async function syncEntries(dateKeys) {
-  let ok = 0, failed = 0;
-  const total = dateKeys.length;
+  let ok = 0, failed = 0, tokenExpired = false;
 
   for (let i = 0; i < dateKeys.length; i++) {
     const dateStr = dateKeys[i];
-    const entry = state.roster[dateStr];
+    const entry   = state.roster[dateStr];
     if (!entry || !entry.shiftTypeId) continue;
 
     const evt = buildEvent(dateStr, entry);
     if (!evt) continue;
 
-    // Update progress
-    const pct = Math.round((i / total) * 100);
-    const pf = document.getElementById('syncProgressFill');
-    const ps = document.getElementById('syncProgressStatus');
+    // FIX 5: Update progress
+    const pct = Math.round((i / dateKeys.length) * 100);
+    const pf  = document.getElementById('syncProgressFill');
+    const ps  = document.getElementById('syncProgressStatus');
     if (pf) pf.style.width = pct + '%';
-    if (ps) ps.textContent = `Syncing ${i+1}/${total}…`;
+    if (ps) ps.textContent = `Syncing ${i+1} of ${dateKeys.length}…`;
 
     try {
       let result;
       if (entry.gcalEventId) {
-        result = await gcalRequest('PATCH', '/' + entry.gcalEventId, evt);
+        try {
+          result = await gcalRequest('PATCH', '/' + entry.gcalEventId, evt);
+        } catch(patchErr) {
+          if (patchErr.message === 'EVENT_NOT_FOUND') {
+            // FIX 2: Event was deleted from GCal — try to find it or create new
+            const existingId = await findExistingGcalEvent(dateStr, evt.summary);
+            if (existingId) {
+              result = await gcalRequest('PATCH', '/' + existingId, evt);
+            } else {
+              result = await gcalRequest('POST', '', evt);
+            }
+            state.roster[dateStr].gcalEventId = result?.id || null;
+          } else {
+            throw patchErr;
+          }
+        }
       } else {
-        result = await gcalRequest('POST', '', evt);
+        // FIX 7: No stored event ID — search before creating to avoid duplicates
+        const existingId = await findExistingGcalEvent(dateStr, evt.summary);
+        if (existingId) {
+          result = await gcalRequest('PATCH', '/' + existingId, evt);
+        } else {
+          result = await gcalRequest('POST', '', evt);
+        }
       }
-      state.roster[dateStr].gcalEventId = result.id;
+      if (result?.id) state.roster[dateStr].gcalEventId = result.id;
       ok++;
     } catch(e) {
-      console.error('Failed to sync', dateStr, e);
+      if (e.message === 'TOKEN_EXPIRED') { tokenExpired = true; break; }
+      console.error('Sync failed for', dateStr, e);
       failed++;
     }
 
-    // Small delay to avoid rate limits
-    if (i < dateKeys.length - 1) await new Promise(r => setTimeout(r, 150));
+    if (i < dateKeys.length - 1) await new Promise(r => setTimeout(r, 120));
   }
 
-  return { ok, failed };
+  return { ok, failed, tokenExpired };
 }
 
 async function deleteGcalEvent(eventId) {
@@ -1070,9 +1263,13 @@ async function deleteGcalEvent(eventId) {
 // SYNC MODAL
 // ═══════════════════════════════════════════════════
 function openSyncModal() {
-  const modal = document.getElementById('syncModal');
+  // FIX 1: Warn if token expired before opening
+  if (state.gcalClientId && !isTokenValid()) {
+    toast('Your Google session has expired. Reconnect in Settings → Google Calendar first.', 'warn');
+    updateGcalStatusUI();
+  }
   renderSyncContent(false);
-  modal.classList.add('open');
+  document.getElementById('syncModal').classList.add('open');
 }
 
 function closeSyncModal() {
@@ -1080,26 +1277,31 @@ function closeSyncModal() {
 }
 
 function renderSyncContent(syncing) {
-  const y = state.year, m = state.month;
-  const prefix = `${y}-${String(m+1).padStart(2,'0')}-`;
+  const y         = state.year, m = state.month;
+  const prefix    = `${y}-${String(m+1).padStart(2,'0')}-`;
   const monthKeys = Object.keys(state.roster).filter(k => k.startsWith(prefix) && state.roster[k]?.shiftTypeId);
-  const allKeys = Object.keys(state.roster).filter(k => state.roster[k]?.shiftTypeId);
+  const allKeys   = Object.keys(state.roster).filter(k => state.roster[k]?.shiftTypeId);
   const connected = isTokenValid();
+  // FIX 11: Check online status
+  const isOnline  = navigator.onLine;
 
   const c = document.getElementById('syncContent');
+
   if (syncing) {
     c.innerHTML = `
       <div style="text-align:center;padding:20px 0">
         <div style="font-size:14px;color:var(--text-muted);margin-bottom:14px" id="syncProgressStatus">Starting sync…</div>
         <div class="progress-bar"><div class="progress-fill" id="syncProgressFill"></div></div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:8px">Do not close this window</div>
       </div>
     `;
     return;
   }
 
   c.innerHTML = `
+    ${!isOnline ? `<div class="warn-box">⚠ No internet connection detected. Connect to the internet before syncing.</div>` : ''}
     ${!connected ? `<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--danger);margin-bottom:14px">
-      Not connected to Google Calendar. Go to Settings → Google Calendar to connect.
+      ${state.gcalClientId ? 'Your Google session has expired — go to Settings → Google Calendar and click Connect / Re-authenticate.' : 'Not connected to Google Calendar. Go to Settings → Google Calendar to connect.'}
     </div>` : ''}
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
       Each shift will be created or updated in your Google Calendar. Existing synced events will be updated, not duplicated.
@@ -1123,7 +1325,7 @@ function renderSyncContent(syncing) {
     <hr class="divider">
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeSyncModal()">Cancel</button>
-      <button class="btn btn-primary" ${!connected?'disabled':''} onclick="doSync()">↑ Sync Now</button>
+      <button class="btn btn-primary" ${(!connected || !isOnline)?'disabled':''} onclick="doSync()">↑ Sync Now</button>
     </div>
   `;
 }
@@ -1135,12 +1337,15 @@ function selectSyncOpt(opt) {
   document.getElementById('sopt-month').classList.toggle('sel', opt==='month');
   document.getElementById('sopt-all').classList.toggle('sel', opt==='all');
   document.querySelector('#sopt-month input').checked = opt==='month';
-  document.querySelector('#sopt-all input').checked = opt==='all';
+  document.querySelector('#sopt-all input').checked   = opt==='all';
 }
 
+// FIX 5: Better sync flow with loading state
 async function doSync() {
-  if (!isTokenValid()) { toast('Not authenticated — connect in Settings first', 'error'); return; }
-  renderSyncContent(true);
+  // FIX 11: Last-minute online check
+  if (!navigator.onLine) { toast('No internet connection', 'error'); return; }
+  // FIX 1: Last-minute token check
+  if (!isTokenValid()) { toast('Session expired — reconnect in Settings', 'warn'); closeSyncModal(); return; }
 
   let keys;
   if (selectedSyncOpt === 'month') {
@@ -1150,19 +1355,25 @@ async function doSync() {
     keys = Object.keys(state.roster).filter(k => state.roster[k]?.shiftTypeId);
   }
 
-  if (!keys.length) {
-    closeSyncModal();
-    toast('No shifts to sync', 'info');
-    return;
-  }
+  if (!keys.length) { closeSyncModal(); toast('No shifts to sync', 'info'); return; }
+
+  // FIX 5: Show loading state, disable close button
+  renderSyncContent(true);
 
   try {
-    const { ok, failed } = await syncEntries(keys);
+    const { ok, failed, tokenExpired } = await syncEntries(keys);
     save();
     renderCalendar();
     closeSyncModal();
-    if (failed === 0) toast(`Synced ${ok} shift${ok!==1?'s':''}`, 'success');
-    else toast(`${ok} synced, ${failed} failed`, failed ? 'error' : 'success');
+
+    if (tokenExpired) {
+      toast('Session expired mid-sync — reconnect and sync again', 'warn');
+      updateGcalStatusUI();
+    } else if (failed === 0) {
+      toast(`Synced ${ok} shift${ok!==1?'s':''}`, 'success');
+    } else {
+      toast(`${ok} synced, ${failed} failed — check console for details`, 'error');
+    }
   } catch(e) {
     closeSyncModal();
     toast('Sync error: ' + e.message, 'error');
@@ -1170,38 +1381,63 @@ async function doSync() {
 }
 
 // ═══════════════════════════════════════════════════
+// CONFIRM DIALOG (replaces native confirm())
+// ═══════════════════════════════════════════════════
+let _confirmResolve = null;
+
+function confirm2(title, msg, okLabel = 'Confirm') {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirmTitle').textContent  = title;
+    document.getElementById('confirmMsg').textContent    = msg;
+    document.getElementById('confirmOkBtn').textContent  = okLabel;
+    document.getElementById('confirmWrap').classList.add('open');
+  });
+}
+
+function confirmResolve(result) {
+  document.getElementById('confirmWrap').classList.remove('open');
+  if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+// ═══════════════════════════════════════════════════
 // TOAST
 // ═══════════════════════════════════════════════════
 function toast(msg, type='info') {
-  const icons = { success:'✓', error:'✕', info:'ℹ' };
+  const icons     = { success:'✓', error:'✕', info:'ℹ', warn:'⚠' };
   const container = document.getElementById('toasts');
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.innerHTML = `<span>${icons[type]||''}</span><span>${msg}</span>`;
+  const el        = document.createElement('div');
+  el.className    = `toast ${type}`;
+  el.innerHTML    = `<span>${icons[type]||''}</span><span>${msg}</span>`;
   container.appendChild(el);
   setTimeout(() => {
     el.style.animation = 'tIn .18s ease reverse';
     setTimeout(() => el.remove(), 180);
-  }, 3500);
+  }, type === 'error' || type === 'warn' ? 5000 : 3500);
 }
 
-// Close modals on overlay click
+// ═══════════════════════════════════════════════════
+// EVENT LISTENERS
+// ═══════════════════════════════════════════════════
 document.getElementById('settingsModal').addEventListener('click', e => {
   if (e.target === document.getElementById('settingsModal')) closeSettings();
 });
 document.getElementById('syncModal').addEventListener('click', e => {
   if (e.target === document.getElementById('syncModal')) closeSyncModal();
 });
+document.getElementById('confirmWrap').addEventListener('click', e => {
+  if (e.target === document.getElementById('confirmWrap')) confirmResolve(false);
+});
 
-// Keyboard shortcuts
+// FIX 4: Keyboard — don't navigate months if drawer open
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    closeDrawer();
-    closeSettings();
-    closeSyncModal();
+    if (document.getElementById('confirmWrap').classList.contains('open')) { confirmResolve(false); return; }
+    closeDrawer(); closeSettings(); closeSyncModal();
   }
-  if (e.key === 'ArrowLeft' && !document.getElementById('drawer').classList.contains('open')) prevMonth();
-  if (e.key === 'ArrowRight' && !document.getElementById('drawer').classList.contains('open')) nextMonth();
+  const drawerOpen = document.getElementById('drawer').classList.contains('open');
+  if (e.key === 'ArrowLeft'  && !drawerOpen) prevMonth();
+  if (e.key === 'ArrowRight' && !drawerOpen) nextMonth();
 });
 
 // ═══════════════════════════════════════════════════
@@ -1209,14 +1445,17 @@ document.addEventListener('keydown', e => {
 // ═══════════════════════════════════════════════════
 function init() {
   load();
+  updateOnlineStatus();
   renderCalendar();
+
   if (state.summaryVisible) {
     document.getElementById('summaryPanel').classList.remove('hidden');
     document.getElementById('summaryToggleBtn').style.color = 'var(--accent)';
   }
-  // Init GCal if client ID saved
+
   window.addEventListener('load', () => {
     if (state.gcalClientId && typeof google !== 'undefined') initGcal();
+    updateGcalStatusUI();
   });
 }
 
