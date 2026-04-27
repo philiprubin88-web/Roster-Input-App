@@ -99,6 +99,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 .cell-hint{font-size:9px;color:var(--text-dim);font-style:italic;margin-top:auto;opacity:0;transition:opacity var(--tr)}
 .day-cell:hover .cell-hint{opacity:1}
 
+/* ── WEEKEND TINT ── */
+.day-cell.weekend{background:rgba(255,255,255,.018)}
+.day-cell.weekend:hover{background:#1e232a}
+.day-cell.weekend.today{background:#1e232a}
+.day-hdr.weekend-hdr{color:#6E7681}
+
+/* ── HOVER TOOLTIP ── */
+.cell-tooltip{position:absolute;bottom:calc(100% + 7px);left:8px;right:8px;background:var(--surface-2);border:1px solid var(--border-2);border-radius:var(--radius);padding:8px 10px;font-size:11px;z-index:150;opacity:0;pointer-events:none;transition:opacity 140ms ease 200ms;box-shadow:0 6px 20px rgba(0,0,0,.5);line-height:1.55}
+.day-cell:hover .cell-tooltip{opacity:1}
+.tooltip-partner{font-weight:600;color:var(--text);margin-bottom:2px;display:flex;align-items:center;gap:5px}
+.tooltip-notes{color:var(--text-muted);font-size:10px;white-space:pre-wrap;word-break:break-word}
+/* Prevent tooltip overflowing at right edge — last 2 columns flip left */
+.day-cell.tooltip-flip .cell-tooltip{left:auto;right:8px}
+
+/* ── TOPBAR HOURS COUNTER ── */
+.hours-counter{display:flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-muted);padding:4px 9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);white-space:nowrap}
+.hours-counter-val{color:var(--text);font-weight:600;font-size:12px}
+.hours-counter-zero{opacity:.4}
+
 /* ── DRAWER ── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;opacity:0;pointer-events:none;transition:opacity var(--tr)}
 .overlay.open{opacity:1;pointer-events:all}
@@ -271,6 +290,12 @@ input[type="checkbox"]{accent-color:var(--accent)}
   </div>
 
   <button class="btn btn-ghost" onclick="goToday()">Today</button>
+
+  <!-- Hours counter -->
+  <div class="hours-counter" id="hoursCounter" title="Hours worked this month (real shifts only)">
+    <span class="hours-counter-val" id="hoursVal">—</span>
+    <span>hrs this month</span>
+  </div>
 
   <div class="gcal-indicator">
     <div class="dot" id="gcalDot"></div>
@@ -679,9 +704,9 @@ function renderCalendar() {
   const grid = document.getElementById('calGrid');
   grid.innerHTML = '';
 
-  DAYS.forEach(d => {
+  DAYS.forEach((d, di) => {
     const h = document.createElement('div');
-    h.className = 'day-hdr';
+    h.className = 'day-hdr' + (di >= 5 ? ' weekend-hdr' : '');
     h.textContent = d;
     grid.appendChild(h);
   });
@@ -706,7 +731,11 @@ function renderCalendar() {
 
     const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
     const isToday = today.getFullYear()===y && today.getMonth()===m && today.getDate()===dayNum;
+    const col = i % 7; // 0=Mon … 5=Sat, 6=Sun
+    const isWeekend = col >= 5;
     if (isToday) cell.classList.add('today');
+    if (isWeekend) cell.classList.add('weekend');
+    if (col >= 5) cell.classList.add('tooltip-flip'); // flip tooltip on last 2 cols
     if (state.selectedDate === dateStr) cell.classList.add('selected');
     cell.onclick = () => openDrawer(dateStr);
 
@@ -737,6 +766,17 @@ function renderCalendar() {
           chip.appendChild(t);
         }
         cell.appendChild(chip);
+
+        // Hover tooltip — only shown when partner or notes exist
+        if (entry.partner || entry.notes) {
+          const tip = document.createElement('div');
+          tip.className = 'cell-tooltip';
+          let tipHTML = '';
+          if (entry.partner) tipHTML += `<div class="tooltip-partner"><span style="opacity:.5;font-size:10px">👤</span>${entry.partner}</div>`;
+          if (entry.notes)   tipHTML += `<div class="tooltip-notes">${entry.notes.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+          tip.innerHTML = tipHTML;
+          cell.appendChild(tip);
+        }
       }
     } else {
       // Pattern suggestion (if no real shift)
@@ -768,7 +808,38 @@ function renderCalendar() {
   }
 
   document.getElementById('monthLabel').textContent = `${MONTHS[m]} ${y}`;
+  updateHoursCounter();
   if (state.summaryVisible) renderSummary();
+}
+
+function updateHoursCounter() {
+  const el = document.getElementById('hoursVal');
+  if (!el) return;
+  const y = state.year, m = state.month;
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}-`;
+  let totalHours = 0;
+  Object.entries(state.roster).forEach(([k, entry]) => {
+    if (!k.startsWith(prefix) || !entry.shiftTypeId) return;
+    const st = state.shiftTypes.find(s => s.id === entry.shiftTypeId);
+    if (!st || st.allDay) return;
+    const sT = entry.modStart || st.start;
+    const eT = entry.modEnd   || st.end;
+    if (!sT || !eT) return;
+    const [sh,sm] = sT.split(':').map(Number);
+    const [eh,em] = eT.split(':').map(Number);
+    let mins = (eh*60+em) - (sh*60+sm);
+    if (mins <= 0) mins += 1440;
+    if (mins > 1440) mins = 1440;
+    totalHours += mins / 60;
+  });
+  const counter = document.getElementById('hoursCounter');
+  if (totalHours === 0) {
+    el.textContent = '0';
+    if (counter) counter.classList.add('hours-counter-zero');
+  } else {
+    el.textContent = totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1);
+    if (counter) counter.classList.remove('hours-counter-zero');
+  }
 }
 
 function formatTime(t) {
