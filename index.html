@@ -652,6 +652,7 @@ let state = {
   bulkLocId: null,
   phVisible: true,
   holidays: {},         // { 'YYYY': [{date,name},...] }
+  gcalEventColors: [],  // fetched live from GCal API after connect
 };
 
 // ═══════════════════════════════════════════════════
@@ -1538,7 +1539,7 @@ function renderShiftList() {
     const item = document.createElement('div');
     item.className = 'stype-item';
     const timeStr = st.allDay ? 'All Day' : (st.start&&st.end?`${st.start}–${st.end}`:'');
-    const gcalC = GCAL_COLORS.find(c=>c.hex===st.color);
+    const gcalC = getActivePalette().find(c=>c.hex===st.color) || GCAL_COLORS.find(c=>c.hex===st.color);
     item.innerHTML = `
       <div class="color-swatch-static" style="background:${st.color}" title="${gcalC?gcalC.name:st.color}"></div>
       <div class="stype-name">${st.name}</div>
@@ -1565,8 +1566,8 @@ function startAddShift() {
 }
 
 function showEditForm(st) {
-  // Build the palette HTML
-  const paletteHTML = GCAL_COLORS.map(c => `
+  // Build the palette HTML using live GCal palette (or hardcoded fallback)
+  const paletteHTML = getActivePalette().map(c => `
     <div class="gcal-palette-item">
       <div class="gcal-swatch${c.hex===st.color?' selected':''}" style="background:${c.hex}" 
            data-hex="${c.hex}" data-id="${c.id}" onclick="selectPaletteColor('${c.hex}','${c.id}')"
@@ -1788,7 +1789,47 @@ function handleToken(response) {
   state.accessToken = response.access_token;
   state.tokenExpiry = Date.now()+(response.expires_in-60)*1000;
   updateGcalStatusUI();
-  toast('Connected to Google Calendar','success');
+  // Fetch the real GCal colour palette immediately so picker is accurate
+  fetchGcalEventColors().then(() => {
+    toast('Connected to Google Calendar','success');
+    // Re-open settings palette if it is open
+    if (document.getElementById('ef-palette')) {
+      const editingSt = state.shiftTypes.find(s => s.id === state.editingShiftId);
+      if (editingSt) showEditForm(editingSt);
+    }
+  });
+}
+
+async function fetchGcalEventColors() {
+  if (!isTokenValid()) return;
+  try {
+    const res  = await fetch('https://www.googleapis.com/calendar/v3/colors', {
+      headers: { 'Authorization': 'Bearer ' + state.accessToken }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    // data.event is an object: { "1": {background, foreground}, "2": {...}, ... }
+    const fetched = Object.entries(data.event || {}).map(([id, val]) => ({
+      id,
+      hex: val.background,
+      // Assign friendly names to known IDs
+      name: {
+        '1':'Tomato','2':'Flamingo','3':'Tangerine','4':'Banana',
+        '5':'Sage','6':'Basil','7':'Peacock','8':'Blueberry',
+        '9':'Lavender','10':'Grape','11':'Graphite'
+      }[id] || ('Color '+id)
+    }));
+    if (fetched.length > 0) {
+      state.gcalEventColors = fetched;
+      // Re-render shift list with accurate colours
+      renderShiftList();
+    }
+  } catch(e) { console.warn('Could not fetch GCal colours:', e); }
+}
+
+// Returns the live GCal palette if fetched, otherwise fall back to hardcoded
+function getActivePalette() {
+  return state.gcalEventColors.length > 0 ? state.gcalEventColors : GCAL_COLORS;
 }
 
 // FIX 1: connectGcal always re-initialises the token client (picks up new Client ID)
@@ -1844,16 +1885,32 @@ async function gcalRequest(method, path, body) {
 }
 
 async function findExistingGcalEvent(dateStr, title) {
+  // Search for ANY event on this date that looks like it could be one of our shifts.
+  // We match on exact title OR on any previously synced title pattern so that
+  // renamed events (e.g. location prefix added) are still found and updated.
   try {
     const [y,m,d] = dateStr.split('-').map(Number);
+    // Use a wider window (midnight to midnight +1 day) to catch overnight events
     const dayStart = new Date(y,m-1,d,0,0,0).toISOString();
-    const dayEnd   = new Date(y,m-1,d,23,59,59).toISOString();
+    const dayEnd   = new Date(y,m-1,d+1,12,0,0).toISOString();
     const calId    = encodeURIComponent(state.gcalCalendarId||'primary');
-    const url      = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${dayStart}&timeMax=${dayEnd}&q=${encodeURIComponent(title)}&singleEvents=true`;
+    // Search without title filter so we catch renamed events too
+    const url      = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${dayStart}&timeMax=${dayEnd}&singleEvents=true&maxResults=20`;
     const res      = await fetch(url,{headers:{'Authorization':'Bearer '+state.accessToken}});
     if (!res.ok) return null;
     const data     = await res.json();
-    return (data.items||[]).find(e=>e.summary===title)?.id||null;
+    const items    = data.items || [];
+
+    // 1. Exact title match
+    const exact = items.find(e => e.summary === title);
+    if (exact) return exact.id;
+
+    // 2. Match any event whose title contains a known shift name (handles location prefix changes)
+    const shiftNames = state.shiftTypes.map(s => s.name);
+    const byShiftName = items.find(e =>
+      shiftNames.some(name => e.summary && e.summary.includes(name))
+    );
+    return byShiftName?.id || null;
   } catch(e){ return null; }
 }
 
@@ -1867,8 +1924,13 @@ function buildEvent(dateStr, entry) {
   const locName = getLocationName(entry.locationId || getDefaultLocationId());
   const title   = locName ? `${locName} - ${st.name}` : st.name;
 
-  // Use the exact GCal colorId stored on the shift type
-  const colorId = st.colorId || hexToColorId(st.color); // fallback for legacy entries
+  // Use stored colorId, or look up from live palette, or fall back to RGB nearest-match
+  let colorId = st.colorId;
+  if (!colorId) {
+    const palette = getActivePalette();
+    const match   = palette.find(c => c.hex.toLowerCase() === st.color.toLowerCase());
+    colorId = match ? match.id : hexToColorId(st.color);
+  }
 
   let desc = [];
   if (locName)                       desc.push('Location: '+locName);
@@ -1907,31 +1969,55 @@ async function syncEntries(dateKeys) {
 
     try {
       let result;
+
+      // Helper: try to write an event with one automatic retry on transient failure
+      const writeEvent = async (method, path, body) => {
+        try {
+          return await gcalRequest(method, path, body);
+        } catch(e) {
+          if (e.message === 'TOKEN_EXPIRED' || e.message === 'EVENT_NOT_FOUND') throw e;
+          // Retry once after a longer pause for transient errors (rate limits, timeouts)
+          await new Promise(r => setTimeout(r, 800));
+          return await gcalRequest(method, path, body);
+        }
+      };
+
       if (entry.gcalEventId) {
-        try { result=await gcalRequest('PATCH','/'+entry.gcalEventId,evt); }
-        catch(e) {
-          if (e.message==='EVENT_NOT_FOUND') {
-            const eid=await findExistingGcalEvent(dateStr,evt.summary);
-            result=eid ? await gcalRequest('PATCH','/'+eid,evt) : await gcalRequest('POST','',evt);
+        try {
+          result = await writeEvent('PATCH', '/'+entry.gcalEventId, evt);
+        } catch(e) {
+          if (e.message === 'EVENT_NOT_FOUND') {
+            // Stored event was deleted from GCal — search for it by date or create fresh
+            const eid = await findExistingGcalEvent(dateStr, evt.summary);
+            result = eid
+              ? await writeEvent('PATCH', '/'+eid, evt)
+              : await writeEvent('POST', '', evt);
+            // Clear stale id so we store the correct one
+            state.roster[dateStr].gcalEventId = null;
           } else throw e;
         }
       } else {
-        const eid=await findExistingGcalEvent(dateStr,evt.summary);
-        result=eid ? await gcalRequest('PATCH','/'+eid,evt) : await gcalRequest('POST','',evt);
+        // No stored event id — search by date first to avoid duplicates
+        const eid = await findExistingGcalEvent(dateStr, evt.summary);
+        result = eid
+          ? await writeEvent('PATCH', '/'+eid, evt)
+          : await writeEvent('POST', '', evt);
       }
-      if (result?.id) state.roster[dateStr].gcalEventId=result.id;
+
+      if (result?.id) state.roster[dateStr].gcalEventId = result.id;
       ok++;
     } catch(e) {
       if (e.message==='TOKEN_EXPIRED') { tokenExpired=true; break; }
-      console.error('Sync failed',dateStr,e);
+      console.error('Sync failed', dateStr, e.message);
       failed++;
     }
 
-    // FIX 3: Update progress AFTER the request completes
+    // Update progress bar after each completed item
     const pctAfter=Math.round(((i+1)/dateKeys.length)*100);
     if(pf) pf.style.width=pctAfter+'%';
 
-    if (i<dateKeys.length-1) await new Promise(r=>setTimeout(r,120));
+    // 250ms between requests to stay well inside GCal API rate limits
+    if (i<dateKeys.length-1) await new Promise(r=>setTimeout(r,250));
   }
   return {ok,failed,tokenExpired};
 }
@@ -1977,7 +2063,7 @@ function renderSyncContent(syncing) {
     ${!connected?`<div style="background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--danger);margin-bottom:14px">
       ${state.gcalClientId?'Session expired — go to Settings → Google Calendar and click Connect / Re-authenticate.':'Not connected — go to Settings → Google Calendar to connect.'}
     </div>`:''}
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each shift is created or updated in Google Calendar. Existing events are updated, not duplicated. Pattern suggestions are never synced.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each shift is created or updated in Google Calendar. Colours match exactly. Existing events are updated, not duplicated. Pattern suggestions are never synced.</div>
     <div>
       <div class="sync-opt sel" id="sopt-month" onclick="selectSyncOpt('month')">
         <input type="radio" name="sopt" checked>
@@ -2102,6 +2188,8 @@ function init() {
   window.addEventListener('load',()=>{
     if (state.gcalClientId && typeof google!=='undefined') initGcal();
     updateGcalStatusUI();
+    // If we somehow have a valid token from a fresh page load, fetch colours
+    if (isTokenValid()) fetchGcalEventColors();
     // Init PH button style
     const phBtn = document.getElementById('phToggleBtn');
     if (phBtn) phBtn.classList.toggle('ph-btn-active', state.phVisible);
