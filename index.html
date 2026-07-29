@@ -119,14 +119,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);fon
 .hours-counter-zero{opacity:.4}
 
 /* ── GCAL COLOUR PALETTE ── */
-.gcal-palette{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}
-.gcal-swatch{width:32px;height:32px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all 140ms ease;position:relative;flex-shrink:0}
-.gcal-swatch:hover{transform:scale(1.15);border-color:rgba(255,255,255,.4)}
-.gcal-swatch.selected{border-color:#fff;box-shadow:0 0 0 2px var(--accent)}
-.gcal-swatch .swatch-tick{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;font-weight:700;opacity:0;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+.gcal-palette{display:grid;grid-template-columns:repeat(6,1fr);gap:8px 6px;margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius)}
+.gcal-swatch{width:30px;height:30px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all 140ms ease;position:relative;flex-shrink:0;margin:0 auto}
+.gcal-swatch:hover{transform:scale(1.18);border-color:rgba(255,255,255,.45)}
+.gcal-swatch.selected{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.9)}
+.gcal-swatch .swatch-tick{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;font-weight:900;opacity:0;text-shadow:0 1px 4px rgba(0,0,0,.6)}
 .gcal-swatch.selected .swatch-tick{opacity:1}
-.gcal-swatch-name{font-size:9px;color:var(--text-dim);text-align:center;margin-top:3px;font-family:'IBM Plex Mono',monospace;letter-spacing:.03em}
-.gcal-palette-item{display:flex;flex-direction:column;align-items:center;gap:0}
+.gcal-swatch-name{font-size:8px;color:var(--text-dim);text-align:center;margin-top:4px;font-family:'IBM Plex Mono',monospace;letter-spacing:.02em;white-space:nowrap}
+.gcal-palette-item{display:flex;flex-direction:column;align-items:center}
 /* Compact swatch in shift list */
 .color-swatch-static{width:13px;height:13px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.2)}
 
@@ -592,8 +592,8 @@ const DEFAULT_SHIFTS = [
   {id:'ns',name:'Night Shift', color:'#3F51B5',colorId:'8', start:'19:00',end:'07:00',overnight:true, allDay:false}, // Blueberry
   {id:'d6',name:'Day 6s',      color:'#33B679',colorId:'2', start:'06:00',end:'18:00',overnight:false,allDay:false}, // Sage
   {id:'n6',name:'Night 6s',    color:'#8E24AA',colorId:'3', start:'18:00',end:'06:00',overnight:true, allDay:false}, // Grape
-  {id:'12',name:'12s Shift',   color:'#E67C73',colorId:'4', start:'12:00',end:'00:00',overnight:true, allDay:false}, // Flamingo
-  {id:'3s',name:'3s Shift',    color:'#D50000',colorId:'10',start:'15:00',end:'03:00',overnight:true, allDay:false}, // Tomato
+  {id:'12',name:'12s Shift',   color:'#F4511E',colorId:'4', start:'12:00',end:'00:00',overnight:true, allDay:false}, // Flamingo (Tangerine)
+  {id:'3s',name:'3s Shift',    color:'#D50000',colorId:'11',start:'15:00',end:'03:00',overnight:true, allDay:false}, // Tomato
   {id:'tr',name:'Training Day',color:'#039BE5',colorId:'7', start:'08:00',end:'16:00',overnight:false,allDay:false}, // Peacock
   {id:'rd',name:'RDO',         color:'#0B8043',colorId:'9', start:null,   end:null,   overnight:false,allDay:true},  // Basil
   {id:'lv',name:'Leave',       color:'#7986CB',colorId:'1', start:null,   end:null,   overnight:false,allDay:true},  // Lavender
@@ -606,20 +606,22 @@ const DEFAULT_LOCATIONS = [
   { id:'loc_default', name:'Chatswood', isDefault:true },
 ];
 
-// Google Calendar colour palette — these are the EXACT colours GCal supports
-// The app only uses these so what you see is exactly what appears in Google Calendar
+// Google Calendar event colour palette — exact colorIds and hex values as shown in GCal UI
+// Ordered to match Google Calendar's own colour picker (row 1: warm, row 2: cool)
 const GCAL_COLORS = [
-  {id:'1', name:'Lavender',  hex:'#7986CB'},
-  {id:'2', name:'Sage',      hex:'#33B679'},
-  {id:'3', name:'Grape',     hex:'#8E24AA'},
-  {id:'4', name:'Flamingo',  hex:'#E67C73'},
+  // Row 1 — warm tones
+  {id:'11',name:'Tomato',    hex:'#D50000'},
+  {id:'4', name:'Flamingo',  hex:'#F4511E'},
+  {id:'6', name:'Tangerine', hex:'#EF6C00'},
   {id:'5', name:'Banana',    hex:'#F6BF26'},
-  {id:'6', name:'Tangerine', hex:'#F4511E'},
+  {id:'2', name:'Sage',      hex:'#33B679'},
+  {id:'9', name:'Basil',     hex:'#0B8043'},
+  // Row 2 — cool tones
   {id:'7', name:'Peacock',   hex:'#039BE5'},
   {id:'8', name:'Blueberry', hex:'#3F51B5'},
-  {id:'9', name:'Basil',     hex:'#0B8043'},
-  {id:'10',name:'Tomato',    hex:'#D50000'},
-  {id:'11',name:'Cobalt',    hex:'#4986E7'},
+  {id:'1', name:'Lavender',  hex:'#7986CB'},
+  {id:'3', name:'Grape',     hex:'#8E24AA'},
+  {id:'10',name:'Graphite',  hex:'#616161'},
 ];
 
 const DAYS   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -1581,7 +1583,7 @@ function showEditForm(st) {
         <input class="fi" id="ef-name" type="text" value="${st.name}" placeholder="e.g. Late Shift">
       </div>
       <div class="fg" style="margin-bottom:14px">
-        <div class="fl" style="margin-bottom:6px">Colour <span style="color:var(--text-dim);font-size:9px;font-family:'IBM Plex Mono',monospace">— these are the exact Google Calendar colours</span></div>
+        <div class="fl" style="margin-bottom:6px">Colour — <span style="color:var(--text-dim);font-size:9px;font-family:'IBM Plex Mono',monospace">matches exactly what appears in Google Calendar</span></div>
         <div class="gcal-palette" id="ef-palette">${paletteHTML}</div>
         <input type="hidden" id="ef-color" value="${st.color}">
         <input type="hidden" id="ef-colorId" value="${st.colorId||'5'}">
