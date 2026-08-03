@@ -658,6 +658,22 @@ let state = {
 // ═══════════════════════════════════════════════════
 // PERSISTENCE
 // ═══════════════════════════════════════════════════
+
+// Debounced save — used for rapid-fire interactions (month navigation, pattern
+// shifting, toggle states). Flushes after 400ms of inactivity.
+let _saveTimer = null;
+function debouncedSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(save, 400);
+}
+
+// Flush any pending debounced save immediately (call before sync, page unload, etc.)
+function flushSave() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; save(); }
+}
+
+// Immediate save — use for destructive actions, sync, or when data must
+// be persisted before any async operation reads it back.
 function save() {
   localStorage.setItem('rs_roster',      JSON.stringify(state.roster));
   localStorage.setItem('rs_shifts',      JSON.stringify(state.shiftTypes));
@@ -714,7 +730,7 @@ function getPatternShiftId(dateStr) {
 function savePatternSettings() {
   state.patternEnabled   = document.getElementById('patternEnabled').checked;
   state.patternStartDate = document.getElementById('patternStartDate').value;
-  save();
+  debouncedSave();
   renderPatternPreview();
   updatePatternCycleInfo();
   renderCalendar();
@@ -731,7 +747,7 @@ function shiftPattern(days) {
   state.patternStartDate = `${yyyy}-${mm}-${dd}`;
   const inp = document.getElementById('patternStartDate');
   if (inp) inp.value = state.patternStartDate;
-  save();
+  debouncedSave();
   renderPatternPreview();
   updatePatternCycleInfo();
   renderCalendar();
@@ -882,6 +898,18 @@ function renderCalendar() {
   const startDow = (firstDay.getDay() + 6) % 7;
   const total    = Math.ceil((startDow + lastDay.getDate()) / 7) * 7;
 
+  // P2-FIX: Load holiday cache synchronously before building cells so PH badges
+  // appear in the first render without needing a second re-render pass.
+  if (state.phVisible && !state.holidays[y]) {
+    try {
+      const cached = localStorage.getItem(`rs_hol_${y}`);
+      if (cached) state.holidays[y] = JSON.parse(cached);
+    } catch(e) {}
+  }
+
+  // P3-FIX: Compute range dates ONCE before the loop (was being recomputed per cell)
+  const rangeDates = getRangeDates();
+
   for (let i = 0; i < total; i++) {
     const dayNum = i - startDow + 1;
     const cell   = document.createElement('div');
@@ -902,7 +930,6 @@ function renderCalendar() {
     if (col >= 5) cell.classList.add('tooltip-flip');
     if (state.selectedDate === dateStr) cell.classList.add('selected');
     // Range selection highlighting
-    const rangeDates = getRangeDates();
     if (dateStr === state.rangeAnchor) {
       cell.classList.add('range-anchor');
       const hint = document.createElement('div');
@@ -1007,11 +1034,9 @@ function renderCalendar() {
 // PUBLIC HOLIDAYS
 // ═══════════════════════════════════════════════════
 async function fetchPublicHolidays(year) {
-  // Check localStorage cache first
-  try {
-    const cached = localStorage.getItem(`rs_hol_${year}`);
-    if (cached) { state.holidays[year] = JSON.parse(cached); renderCalendar(); return; }
-  } catch(e) {}
+  // Note: cache is loaded synchronously inside renderCalendar before the cell loop.
+  // This function only needs to handle the network fetch path.
+  if (state.holidays[year]) return; // already loaded (sync cache hit), nothing to do
   if (!navigator.onLine) return;
   try {
     const res  = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/AU`);
@@ -1023,7 +1048,7 @@ async function fetchPublicHolidays(year) {
     ).map(h => ({ date: h.date, name: h.localName }));
     state.holidays[year] = nsw;
     localStorage.setItem(`rs_hol_${year}`, JSON.stringify(nsw));
-    renderCalendar();
+    renderCalendar(); // Only triggers a re-render on a real network fetch (cache miss)
   } catch(e) { console.warn('Holiday fetch failed:', e); }
 }
 
@@ -1041,7 +1066,7 @@ function togglePublicHolidays() {
     const y = state.year;
     if (!state.holidays[y]) fetchPublicHolidays(y);
   }
-  save();
+  debouncedSave();
   renderCalendar();
 }
 
@@ -1240,8 +1265,25 @@ function closeDrawerSilent() {
 // DRAWER
 // ═══════════════════════════════════════════════════
 function openDrawer(dateStr) {
+  const wasOpen = document.getElementById('drawer').classList.contains('open');
   state.selectedDate = dateStr;
-  renderCalendar();
+  if (wasOpen) {
+    // Drawer already open (user clicked a different day without closing).
+    // Just update the selected highlight cheaply without a full grid rebuild.
+    document.querySelectorAll('.day-cell.selected').forEach(c => c.classList.remove('selected'));
+    document.querySelectorAll('.day-cell.range-anchor, .day-cell.in-range').forEach(c => {
+      c.classList.remove('range-anchor','in-range');
+    });
+    // Find and highlight the new cell by its position in the grid
+    const cells = document.querySelectorAll('.day-cell:not(.other)');
+    cells.forEach(c => {
+      if (c.querySelector('.day-num')?.textContent?.trim() === String(parseInt(dateStr.split('-')[2]))) {
+        c.classList.add('selected');
+      }
+    });
+  } else {
+    renderCalendar();
+  }
   populateDrawer(dateStr);
   document.getElementById('drawerOverlay').classList.add('open');
   document.getElementById('drawer').classList.add('open');
@@ -1264,6 +1306,7 @@ function populateDrawer(dateStr) {
       state.locations.forEach(loc => {
         const pill = document.createElement('button');
         pill.className = 'loc-pill' + (loc.id === currentLocId ? ' active' : '');
+        pill.dataset.locId = loc.id;
         pill.innerHTML = loc.name + (loc.isDefault ? '<span class="loc-pill-default-tag">default</span>' : '');
         pill.onclick = () => selectLocation(loc.id, dateStr);
         locPills.appendChild(pill);
@@ -1355,9 +1398,9 @@ function selectLocation(locId, dateStr) {
   if (!date) return;
   if (!state.roster[date]) state.roster[date] = {};
   state.roster[date].locationId = locId;
-  // update pill highlights without full repopulate
-  document.querySelectorAll('.loc-pill').forEach((p, i) => {
-    p.classList.toggle('active', state.locations[i]?.id === locId);
+  // Match by data-loc-id attribute — immune to array reordering after deletions
+  document.querySelectorAll('.loc-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.locId === locId);
   });
 }
 
@@ -1401,8 +1444,10 @@ function saveEntry() {
 
   const existing = state.roster[date] || {};
   const typeChanged = existing.shiftTypeId && existing.shiftTypeId !== shiftTypeId;
-  // Resolve locationId: use what's currently set on the entry (updated live by selectLocation), or default
-  const locationId = existing.locationId || getDefaultLocationId();
+  // Read locationId from the active pill in the DOM — explicit and immune to
+  // state mutation ordering issues. Falls back to default if no pill is active.
+  const activePill = document.querySelector('.loc-pill.active');
+  const locationId = activePill?.dataset.locId || existing.locationId || getDefaultLocationId();
   state.roster[date] = {
     shiftTypeId,
     locationId,
@@ -1449,7 +1494,7 @@ function toggleSummary() {
   document.getElementById('summaryPanel').classList.toggle('hidden', !state.summaryVisible);
   document.getElementById('summaryToggleBtn').style.color = state.summaryVisible ? 'var(--accent)' : '';
   if (state.summaryVisible) renderSummary();
-  save();
+  debouncedSave();
 }
 
 function renderSummary() {
@@ -1890,9 +1935,11 @@ async function findExistingGcalEvent(dateStr, title) {
   // renamed events (e.g. location prefix added) are still found and updated.
   try {
     const [y,m,d] = dateStr.split('-').map(Number);
-    // Use a wider window (midnight to midnight +1 day) to catch overnight events
+    // Match only events that START on this date (timeMin/timeMax filter on start time).
+    // Overnight events that start today and end tomorrow are correctly matched.
+    // The previous 36-hour window caused false matches on the following day's events.
     const dayStart = new Date(y,m-1,d,0,0,0).toISOString();
-    const dayEnd   = new Date(y,m-1,d+1,12,0,0).toISOString();
+    const dayEnd   = new Date(y,m-1,d,23,59,59).toISOString();
     const calId    = encodeURIComponent(state.gcalCalendarId||'primary');
     // Search without title filter so we catch renamed events too
     const url      = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${dayStart}&timeMax=${dayEnd}&singleEvents=true&maxResults=20`;
@@ -2094,6 +2141,7 @@ function selectSyncOpt(opt) {
 async function doSync() {
   if (!navigator.onLine) { toast('No internet connection','error'); return; }
   if (!isTokenValid())   { toast('Session expired — reconnect in Settings','warn'); closeSyncModal(); return; }
+  flushSave(); // Ensure any pending debounced writes are committed before sync reads state
 
   let keys;
   if (selectedSyncOpt==='month') {
