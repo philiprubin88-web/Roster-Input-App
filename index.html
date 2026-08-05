@@ -684,6 +684,9 @@ function save() {
   localStorage.setItem('rs_pat_start',   state.patternStartDate);
   localStorage.setItem('rs_locations',   JSON.stringify(state.locations));
   localStorage.setItem('rs_ph_visible',  state.phVisible ? '1' : '0');
+  if (state.gcalEventColors.length) {
+    localStorage.setItem('rs_gcal_colors', JSON.stringify(state.gcalEventColors));
+  }
 }
 
 function load() {
@@ -701,6 +704,10 @@ function load() {
   catch(e){ state.locations = DEFAULT_LOCATIONS; }
   const phStored = localStorage.getItem('rs_ph_visible');
   state.phVisible = phStored === null ? true : phStored === '1';
+  try {
+    const storedColors = JSON.parse(localStorage.getItem('rs_gcal_colors'));
+    state.gcalEventColors = Array.isArray(storedColors) && storedColors.length ? storedColors : [];
+  } catch(e) { state.gcalEventColors = []; }
   // Migrate: ensure all shift types have a colorId (for data loaded before this update)
   state.shiftTypes.forEach(st => {
     if (!st.colorId) {
@@ -1848,26 +1855,39 @@ function handleToken(response) {
 async function fetchGcalEventColors() {
   if (!isTokenValid()) return;
   try {
-    const res  = await fetch('https://www.googleapis.com/calendar/v3/colors', {
+    const res = await fetch('https://www.googleapis.com/calendar/v3/colors', {
       headers: { 'Authorization': 'Bearer ' + state.accessToken }
     });
     if (!res.ok) return;
     const data = await res.json();
-    // data.event is an object: { "1": {background, foreground}, "2": {...}, ... }
+
+    // Build palette from live API response — hex values are authoritative
+    // Use our hardcoded name list as display labels only (names don't affect sync)
     const fetched = Object.entries(data.event || {}).map(([id, val]) => ({
       id,
       hex: val.background,
-      // Assign friendly names to known IDs
-      name: {
-        '1':'Tomato','2':'Flamingo','3':'Tangerine','4':'Banana',
-        '5':'Sage','6':'Basil','7':'Peacock','8':'Blueberry',
-        '9':'Lavender','10':'Grape','11':'Graphite'
-      }[id] || ('Color '+id)
+      name: GCAL_COLORS.find(c => c.id === id)?.name || ('Color ' + id)
     }));
+
     if (fetched.length > 0) {
       state.gcalEventColors = fetched;
-      // Re-render shift list with accurate colours
+
+      // FIX 2: Update colorId on every stored shift type to match the live palette.
+      // This corrects any stale/wrong colorIds that were set before the live fetch.
+      let updated = false;
+      state.shiftTypes.forEach(st => {
+        const match = fetched.find(c =>
+          c.hex.toLowerCase() === (st.color || '').toLowerCase()
+        );
+        if (match && match.id !== st.colorId) {
+          st.colorId = match.id;
+          updated = true;
+        }
+      });
+
+      save(); // Persist updated colorIds and the live palette
       renderShiftList();
+      if (updated) console.log('Shift type colorIds updated from live GCal palette');
     }
   } catch(e) { console.warn('Could not fetch GCal colours:', e); }
 }
@@ -1925,6 +1945,12 @@ async function gcalRequest(method, path, body) {
   const res = await fetch(url,opts);
   if (res.status===401) { state.accessToken=null; state.tokenExpiry=null; updateGcalStatusUI(); throw new Error('TOKEN_EXPIRED'); }
   if (res.status===404||res.status===410) throw new Error('EVENT_NOT_FOUND');
+  if (res.status===400) {
+    // Bad request — most commonly an invalid colorId for this calendar.
+    // Expose as BAD_REQUEST so the caller can retry without colorId.
+    const err=await res.json().catch(()=>({}));
+    throw new Error('BAD_REQUEST:' + (err.error?.message||''));
+  }
   if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err.error?.message||`HTTP ${res.status}`); }
   return method==='DELETE'?null:res.json();
 }
@@ -1985,10 +2011,14 @@ function buildEvent(dateStr, entry) {
   if (entry.modStart||entry.modEnd)  desc.push('Modified hours: '+(entry.modStart||'default')+' – '+(entry.modEnd||'default'));
   if (entry.notes)                   desc.push(entry.notes);
 
+  // Only include colorId if it's a valid non-empty string — omitting it is safe
+  // (GCal uses calendar default colour) but sending an invalid value causes 400 errors
+  const colorField = colorId ? { colorId } : {};
+
   if (st.allDay||!sT||!eT) {
     const nd = new Date(y,m-1,d+1);
     const endDate = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}-${String(nd.getDate()).padStart(2,'0')}`;
-    return {summary:title,description:desc.join('\n')||undefined,colorId,start:{date:dateStr},end:{date:endDate}};
+    return {summary:title,description:desc.join('\n')||undefined,...colorField,start:{date:dateStr},end:{date:endDate}};
   }
   const pad=n=>String(n).padStart(2,'0');
   const [sh,sm]=sT.split(':').map(Number), [eh,em]=eT.split(':').map(Number);
@@ -1996,11 +2026,11 @@ function buildEvent(dateStr, entry) {
   let endDt=new Date(y,m-1,d,eh,em);
   if (st.overnight||(eh*60+em)<=(sh*60+sm)) endDt.setDate(endDt.getDate()+1);
   const fmt=dt=>`${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
-  return {summary:title,description:desc.join('\n')||undefined,colorId,start:{dateTime:fmt(startDt),timeZone:'Australia/Sydney'},end:{dateTime:fmt(endDt),timeZone:'Australia/Sydney'}};
+  return {summary:title,description:desc.join('\n')||undefined,...colorField,start:{dateTime:fmt(startDt),timeZone:'Australia/Sydney'},end:{dateTime:fmt(endDt),timeZone:'Australia/Sydney'}};
 }
 
 async function syncEntries(dateKeys) {
-  let ok=0, failed=0, tokenExpired=false;
+  let ok=0, failed=0, tokenExpired=false, failures=[];
   for (let i=0; i<dateKeys.length; i++) {
     const dateStr=dateKeys[i], entry=state.roster[dateStr];
     if (!entry||!entry.shiftTypeId) continue;
@@ -2017,14 +2047,26 @@ async function syncEntries(dateKeys) {
     try {
       let result;
 
-      // Helper: try to write an event with one automatic retry on transient failure
+      // Helper: write an event with smart retry logic
       const writeEvent = async (method, path, body) => {
         try {
           return await gcalRequest(method, path, body);
         } catch(e) {
+          // Never retry these — they need different handling upstream
           if (e.message === 'TOKEN_EXPIRED' || e.message === 'EVENT_NOT_FOUND') throw e;
-          // Retry once after a longer pause for transient errors (rate limits, timeouts)
-          await new Promise(r => setTimeout(r, 800));
+
+          if (e.message.startsWith('BAD_REQUEST')) {
+            // Almost certainly an invalid colorId for this calendar.
+            // Strip colorId and retry immediately — the event is more important than the colour.
+            const bodyNoColor = { ...body };
+            delete bodyNoColor.colorId;
+            console.warn('GCal rejected colorId, retrying without it for', path);
+            await new Promise(r => setTimeout(r, 300));
+            return await gcalRequest(method, path, bodyNoColor);
+          }
+
+          // Transient error (rate limit, timeout) — wait longer then retry with original body
+          await new Promise(r => setTimeout(r, 1000));
           return await gcalRequest(method, path, body);
         }
       };
@@ -2056,6 +2098,7 @@ async function syncEntries(dateKeys) {
     } catch(e) {
       if (e.message==='TOKEN_EXPIRED') { tokenExpired=true; break; }
       console.error('Sync failed', dateStr, e.message);
+      failures.push({ date: dateStr, reason: e.message });
       failed++;
     }
 
@@ -2066,7 +2109,7 @@ async function syncEntries(dateKeys) {
     // 250ms between requests to stay well inside GCal API rate limits
     if (i<dateKeys.length-1) await new Promise(r=>setTimeout(r,250));
   }
-  return {ok,failed,tokenExpired};
+  return {ok,failed,tokenExpired,failures};
 }
 
 async function deleteGcalEvent(eventId) {
@@ -2138,9 +2181,13 @@ function selectSyncOpt(opt) {
   document.querySelector('#sopt-all input').checked=opt==='all';
 }
 
+// Guard against concurrent sync runs
+let _syncInProgress = false;
+
 async function doSync() {
   if (!navigator.onLine) { toast('No internet connection','error'); return; }
   if (!isTokenValid())   { toast('Session expired — reconnect in Settings','warn'); closeSyncModal(); return; }
+  if (_syncInProgress)   { toast('Sync already in progress','warn'); return; }
   flushSave(); // Ensure any pending debounced writes are committed before sync reads state
 
   let keys;
@@ -2152,20 +2199,41 @@ async function doSync() {
   }
   if (!keys.length) { closeSyncModal(); toast('No shifts to sync','info'); return; }
 
+  // FIX 7: Sort chronologically so token expiry always breaks at the end, not mid-month
+  keys.sort();
+
   renderSyncContent(true);
+  _syncInProgress = true;
+
+  // Pre-sync: warn about entries with deleted shift types that will be silently skipped
+  const broken = keys.filter(k => !state.shiftTypes.find(s => s.id === state.roster[k]?.shiftTypeId));
+  if (broken.length) {
+    toast(`${broken.length} entr${broken.length!==1?'ies':'y'} skipped — shift type was deleted`, 'warn');
+  }
+
+  // Pre-sync: ensure we have the live GCal colour palette so colorIds are correct
+  if (state.gcalEventColors.length === 0) await fetchGcalEventColors();
 
   try {
-    const {ok,failed,tokenExpired}=await syncEntries(keys);
-    // FIX 3: Set progress to 100% when complete
+    const {ok,failed,tokenExpired,failures}=await syncEntries(keys);
     const pf=document.getElementById('syncProgressFill');
     if(pf) pf.style.width='100%';
     await new Promise(r=>setTimeout(r,300));
     save(); renderCalendar(); closeSyncModal();
-    if (tokenExpired) toast('Session expired mid-sync — reconnect and sync again','warn');
-    else if (failed===0) toast(`Synced ${ok} shift${ok!==1?'s':''}  ✓`,'success');
-    else toast(`${ok} synced, ${failed} failed`,'error');
+
+    if (tokenExpired) {
+      toast('Session expired mid-sync — reconnect and sync again','warn');
+    } else if (failed===0) {
+      toast(`Synced ${ok} shift${ok!==1?'s':''} ✓`,'success');
+    } else {
+      // Log detail to console for debugging
+      console.warn('Sync failures:', failures);
+      toast(`${ok} synced, ${failed} failed — check browser console (F12) for details`,'error');
+    }
   } catch(e) {
     closeSyncModal(); toast('Sync error: '+e.message,'error');
+  } finally {
+    _syncInProgress = false;
   }
 }
 
@@ -2236,8 +2304,8 @@ function init() {
   window.addEventListener('load',()=>{
     if (state.gcalClientId && typeof google!=='undefined') initGcal();
     updateGcalStatusUI();
-    // If we somehow have a valid token from a fresh page load, fetch colours
-    if (isTokenValid()) fetchGcalEventColors();
+    // Refresh live colour palette if token is valid and colours aren't already cached
+    if (isTokenValid() && state.gcalEventColors.length === 0) fetchGcalEventColors();
     // Init PH button style
     const phBtn = document.getElementById('phToggleBtn');
     if (phBtn) phBtn.classList.toggle('ph-btn-active', state.phVisible);
