@@ -1947,44 +1947,59 @@ async function gcalRequest(method, path, body) {
   if (res.status===404||res.status===410) throw new Error('EVENT_NOT_FOUND');
   if (res.status===400) {
     // Bad request — most commonly an invalid colorId for this calendar.
-    // Expose as BAD_REQUEST so the caller can retry without colorId.
-    const err=await res.json().catch(()=>({}));
-    throw new Error('BAD_REQUEST:' + (err.error?.message||''));
+    // Expose as BAD_REQUEST so writeEvent can retry without colorId.
+    const err = await res.json().catch(()=>({}));
+    const detail = err.error?.message || err.error?.errors?.[0]?.message || 'Bad request';
+    console.warn('GCal 400:', detail, '| path:', path);
+    throw new Error('BAD_REQUEST:' + detail);
   }
-  if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err.error?.message||`HTTP ${res.status}`); }
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    const detail = err.error?.message || `HTTP ${res.status}`;
+    console.warn('GCal error:', res.status, detail, '| path:', path);
+    throw new Error(detail);
+  }
   return method==='DELETE'?null:res.json();
 }
 
 async function findExistingGcalEvent(dateStr, title) {
-  // Search for ANY event on this date that looks like it could be one of our shifts.
-  // We match on exact title OR on any previously synced title pattern so that
-  // renamed events (e.g. location prefix added) are still found and updated.
+  // Safe event search: only returns events WE created (tagged with our extendedProperty),
+  // or events with an exact title match. Never matches by "contains shift name" — that
+  // caused personal calendar events to be overwritten with shift data.
   try {
+    const calId = encodeURIComponent(state.gcalCalendarId || 'primary');
+
+    // Strategy 1: search by our private extendedProperty tag (safest — only our events)
+    const tagUrl = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events` +
+      `?privateExtendedProperty=rosterSyncDate%3D${dateStr}&singleEvents=true&maxResults=5`;
+    const tagRes = await fetch(tagUrl, { headers: { 'Authorization': 'Bearer ' + state.accessToken } });
+    if (tagRes.ok) {
+      const tagData = await tagRes.json();
+      const tagged  = (tagData.items || []).find(e => e.summary === title);
+      if (tagged) return tagged.id;
+      // Also accept any tagged event on this date regardless of title (handles renames)
+      if (tagData.items?.length > 0) return tagData.items[0].id;
+    }
+
+    // Strategy 2: search by exact title on this day (safe — exact match only, no fuzzy)
+    // Only used for events created before the extendedProperty tag was added.
     const [y,m,d] = dateStr.split('-').map(Number);
-    // Match only events that START on this date (timeMin/timeMax filter on start time).
-    // Overnight events that start today and end tomorrow are correctly matched.
-    // The previous 36-hour window caused false matches on the following day's events.
     const dayStart = new Date(y,m-1,d,0,0,0).toISOString();
     const dayEnd   = new Date(y,m-1,d,23,59,59).toISOString();
-    const calId    = encodeURIComponent(state.gcalCalendarId||'primary');
-    // Search without title filter so we catch renamed events too
-    const url      = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${dayStart}&timeMax=${dayEnd}&singleEvents=true&maxResults=20`;
-    const res      = await fetch(url,{headers:{'Authorization':'Bearer '+state.accessToken}});
-    if (!res.ok) return null;
-    const data     = await res.json();
-    const items    = data.items || [];
+    const titleUrl = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events` +
+      `?timeMin=${dayStart}&timeMax=${dayEnd}&q=${encodeURIComponent(title)}&singleEvents=true&maxResults=10`;
+    const titleRes = await fetch(titleUrl, { headers: { 'Authorization': 'Bearer ' + state.accessToken } });
+    if (titleRes.ok) {
+      const titleData = await titleRes.json();
+      const exact = (titleData.items || []).find(e => e.summary === title);
+      if (exact) return exact.id;
+    }
 
-    // 1. Exact title match
-    const exact = items.find(e => e.summary === title);
-    if (exact) return exact.id;
-
-    // 2. Match any event whose title contains a known shift name (handles location prefix changes)
-    const shiftNames = state.shiftTypes.map(s => s.name);
-    const byShiftName = items.find(e =>
-      shiftNames.some(name => e.summary && e.summary.includes(name))
-    );
-    return byShiftName?.id || null;
-  } catch(e){ return null; }
+    return null; // No safe match found — caller will POST a new event
+  } catch(e) {
+    console.warn('findExistingGcalEvent error:', e.message);
+    return null;
+  }
 }
 
 function buildEvent(dateStr, entry) {
@@ -2015,10 +2030,14 @@ function buildEvent(dateStr, entry) {
   // (GCal uses calendar default colour) but sending an invalid value causes 400 errors
   const colorField = colorId ? { colorId } : {};
 
+  // Tag every event with a private extended property so we can safely find OUR
+  // events later without accidentally matching personal calendar events.
+  const extProps = { extendedProperties: { private: { rosterSyncDate: dateStr } } };
+
   if (st.allDay||!sT||!eT) {
     const nd = new Date(y,m-1,d+1);
     const endDate = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}-${String(nd.getDate()).padStart(2,'0')}`;
-    return {summary:title,description:desc.join('\n')||undefined,...colorField,start:{date:dateStr},end:{date:endDate}};
+    return {summary:title,description:desc.join('\n')||undefined,...colorField,...extProps,start:{date:dateStr},end:{date:endDate}};
   }
   const pad=n=>String(n).padStart(2,'0');
   const [sh,sm]=sT.split(':').map(Number), [eh,em]=eT.split(':').map(Number);
@@ -2026,7 +2045,7 @@ function buildEvent(dateStr, entry) {
   let endDt=new Date(y,m-1,d,eh,em);
   if (st.overnight||(eh*60+em)<=(sh*60+sm)) endDt.setDate(endDt.getDate()+1);
   const fmt=dt=>`${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:00`;
-  return {summary:title,description:desc.join('\n')||undefined,...colorField,start:{dateTime:fmt(startDt),timeZone:'Australia/Sydney'},end:{dateTime:fmt(endDt),timeZone:'Australia/Sydney'}};
+  return {summary:title,description:desc.join('\n')||undefined,...colorField,...extProps,start:{dateTime:fmt(startDt),timeZone:'Australia/Sydney'},end:{dateTime:fmt(endDt),timeZone:'Australia/Sydney'}};
 }
 
 async function syncEntries(dateKeys) {
@@ -2037,12 +2056,12 @@ async function syncEntries(dateKeys) {
     const evt=buildEvent(dateStr,entry);
     if (!evt) continue;
 
-    // FIX 3: Update progress AFTER completing each item (accurate percentage)
-    const pf=document.getElementById('syncProgressFill');
-    const ps=document.getElementById('syncProgressStatus');
-    const pct=Math.round((i/dateKeys.length)*100);
-    if(pf) pf.style.width=pct+'%';
-    if(ps) ps.textContent=`Syncing ${i+1} of ${dateKeys.length}…`;
+    // Update progress at start of each item
+    const pf = document.getElementById('syncProgressFill');
+    const ps = document.getElementById('syncProgressStatus');
+    const pct = Math.round((i / dateKeys.length) * 100);
+    if (pf) pf.style.width = pct + '%';
+    if (ps) ps.textContent  = `Syncing ${i+1} of ${dateKeys.length}…`;
 
     try {
       let result;
@@ -2072,25 +2091,34 @@ async function syncEntries(dateKeys) {
       };
 
       if (entry.gcalEventId) {
+        // We have a stored event ID — PATCH it directly
         try {
-          result = await writeEvent('PATCH', '/'+entry.gcalEventId, evt);
+          result = await writeEvent('PATCH', '/' + entry.gcalEventId, evt);
         } catch(e) {
           if (e.message === 'EVENT_NOT_FOUND') {
-            // Stored event was deleted from GCal — search for it by date or create fresh
+            // Stored ID is stale (event deleted from GCal manually).
+            // Try to find a replacement using our safe search, otherwise create fresh.
+            console.log('Stored event not found for', dateStr, '— searching for replacement');
+            state.roster[dateStr].gcalEventId = null;
             const eid = await findExistingGcalEvent(dateStr, evt.summary);
             result = eid
-              ? await writeEvent('PATCH', '/'+eid, evt)
+              ? await writeEvent('PATCH', '/' + eid, evt)
               : await writeEvent('POST', '', evt);
-            // Clear stale id so we store the correct one
-            state.roster[dateStr].gcalEventId = null;
-          } else throw e;
+          } else {
+            throw e;
+          }
         }
       } else {
-        // No stored event id — search by date first to avoid duplicates
+        // No stored event ID. Search safely for an existing match (e.g. if localStorage
+        // was cleared), then create new if nothing found. The safe search will NEVER
+        // match personal calendar events.
         const eid = await findExistingGcalEvent(dateStr, evt.summary);
-        result = eid
-          ? await writeEvent('PATCH', '/'+eid, evt)
-          : await writeEvent('POST', '', evt);
+        if (eid) {
+          console.log('Found existing event for', dateStr, '— updating');
+          result = await writeEvent('PATCH', '/' + eid, evt);
+        } else {
+          result = await writeEvent('POST', '', evt);
+        }
       }
 
       if (result?.id) state.roster[dateStr].gcalEventId = result.id;
@@ -2103,11 +2131,12 @@ async function syncEntries(dateKeys) {
     }
 
     // Update progress bar after each completed item
-    const pctAfter=Math.round(((i+1)/dateKeys.length)*100);
-    if(pf) pf.style.width=pctAfter+'%';
+    const pctAfter = Math.round(((i+1) / dateKeys.length) * 100);
+    const pfAfter  = document.getElementById('syncProgressFill');
+    if (pfAfter) pfAfter.style.width = pctAfter + '%';
 
     // 250ms between requests to stay well inside GCal API rate limits
-    if (i<dateKeys.length-1) await new Promise(r=>setTimeout(r,250));
+    if (i < dateKeys.length-1) await new Promise(r => setTimeout(r, 250));
   }
   return {ok,failed,tokenExpired,failures};
 }
@@ -2204,6 +2233,9 @@ async function doSync() {
 
   renderSyncContent(true);
   _syncInProgress = true;
+  // Disable the modal close button during sync to prevent interruption
+  const syncCloseBtn = document.querySelector('#syncModal .btn-icon');
+  if (syncCloseBtn) syncCloseBtn.disabled = true;
 
   // Pre-sync: warn about entries with deleted shift types that will be silently skipped
   const broken = keys.filter(k => !state.shiftTypes.find(s => s.id === state.roster[k]?.shiftTypeId));
@@ -2223,17 +2255,37 @@ async function doSync() {
 
     if (tokenExpired) {
       toast('Session expired mid-sync — reconnect and sync again','warn');
-    } else if (failed===0) {
-      toast(`Synced ${ok} shift${ok!==1?'s':''} ✓`,'success');
+    } else if (failed === 0) {
+      toast(`Synced ${ok} shift${ok!==1?'s':''} ✓`, 'success');
     } else {
-      // Log detail to console for debugging
+      // Log and show detail so the user knows exactly which dates failed
       console.warn('Sync failures:', failures);
-      toast(`${ok} synced, ${failed} failed — check browser console (F12) for details`,'error');
+      // Show failure report in modal briefly before closing
+      const sc = document.getElementById('syncContent');
+      if (sc) {
+        sc.innerHTML = `
+          <div style="color:var(--warn);font-weight:600;margin-bottom:10px">
+            ${ok} synced, ${failed} failed
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+            Failed dates (check F12 console for details):
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px">
+            ${failures.map(f=>`<span style="font-family:'IBM Plex Mono',monospace;font-size:10px;
+              background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);
+              border-radius:4px;padding:2px 7px;color:var(--danger)">${f.date}</span>`).join('')}
+          </div>
+          <button class="btn btn-ghost" onclick="closeSyncModal()" style="width:100%">Close</button>`;
+        return; // Don't auto-close — let user read the failures
+      }
+      toast(`${ok} synced, ${failed} failed — see details above`, 'error');
     }
   } catch(e) {
     closeSyncModal(); toast('Sync error: '+e.message,'error');
   } finally {
     _syncInProgress = false;
+    const syncCloseBtnFinal = document.querySelector('#syncModal .btn-icon');
+    if (syncCloseBtnFinal) syncCloseBtnFinal.disabled = false;
   }
 }
 
