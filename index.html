@@ -2049,100 +2049,102 @@ function buildEvent(dateStr, entry) {
 }
 
 async function syncEntries(dateKeys) {
-  let ok=0, failed=0, tokenExpired=false, failures=[];
-  for (let i=0; i<dateKeys.length; i++) {
-    const dateStr=dateKeys[i], entry=state.roster[dateStr];
-    if (!entry||!entry.shiftTypeId) continue;
-    const evt=buildEvent(dateStr,entry);
-    if (!evt) continue;
+  let ok = 0, failed = 0, tokenExpired = false, failures = [];
 
-    // Update progress at start of each item
+  // Helper: attempt a gcalRequest, on BAD_REQUEST retry without colorId.
+  // Any other error is re-thrown for the caller to handle.
+  async function writeEvent(method, path, body) {
+    try {
+      return await gcalRequest(method, path, body);
+    } catch(e) {
+      if (e.message === 'TOKEN_EXPIRED' || e.message === 'EVENT_NOT_FOUND') throw e;
+
+      if (e.message.startsWith('BAD_REQUEST')) {
+        // Likely an invalid colorId — strip it and retry. The event matters more
+        // than the colour. If this also fails, the error propagates as normal.
+        const bodyNoColor = { ...body };
+        delete bodyNoColor.colorId;
+        console.warn('GCal BAD_REQUEST — retrying without colorId for', path);
+        await delay(400);
+        return await gcalRequest(method, path, bodyNoColor);
+      }
+
+      // Other errors (rate limit, network) — one retry after a longer pause
+      console.warn('GCal error, retrying in 1s:', e.message);
+      await delay(1000);
+      return await gcalRequest(method, path, body);
+    }
+  }
+
+  for (let i = 0; i < dateKeys.length; i++) {
+    const dateStr = dateKeys[i];
+    const entry   = state.roster[dateStr];
+    if (!entry || !entry.shiftTypeId) continue;
+
+    const evt = buildEvent(dateStr, entry);
+    if (!evt) { console.warn('buildEvent returned null for', dateStr); continue; }
+
+    // Update progress UI
     const pf = document.getElementById('syncProgressFill');
     const ps = document.getElementById('syncProgressStatus');
-    const pct = Math.round((i / dateKeys.length) * 100);
-    if (pf) pf.style.width = pct + '%';
-    if (ps) ps.textContent  = `Syncing ${i+1} of ${dateKeys.length}…`;
+    if (pf) pf.style.width = Math.round((i / dateKeys.length) * 100) + '%';
+    if (ps) ps.textContent  = `Syncing ${i + 1} of ${dateKeys.length}…`;
 
     try {
       let result;
 
-      // Helper: write an event with smart retry logic
-      const writeEvent = async (method, path, body) => {
-        try {
-          return await gcalRequest(method, path, body);
-        } catch(e) {
-          // Never retry these — they need different handling upstream
-          if (e.message === 'TOKEN_EXPIRED' || e.message === 'EVENT_NOT_FOUND') throw e;
-
-          if (e.message.startsWith('BAD_REQUEST')) {
-            // Almost certainly an invalid colorId for this calendar.
-            // Strip colorId and retry immediately — the event is more important than the colour.
-            const bodyNoColor = { ...body };
-            delete bodyNoColor.colorId;
-            console.warn('GCal rejected colorId, retrying without it for', path);
-            await new Promise(r => setTimeout(r, 300));
-            return await gcalRequest(method, path, bodyNoColor);
-          }
-
-          // Transient error (rate limit, timeout) — wait longer then retry with original body
-          await new Promise(r => setTimeout(r, 1000));
-          return await gcalRequest(method, path, body);
-        }
-      };
-
       if (entry.gcalEventId) {
-        // We have a stored event ID — PATCH it directly
+        // We have a stored ID — PATCH directly
         try {
           result = await writeEvent('PATCH', '/' + entry.gcalEventId, evt);
         } catch(e) {
           if (e.message === 'EVENT_NOT_FOUND') {
-            // Stored ID is stale (event deleted from GCal manually).
-            // Try to find a replacement using our safe search, otherwise create fresh.
-            console.log('Stored event not found for', dateStr, '— searching for replacement');
+            // The stored event was deleted from GCal — create a fresh one
+            console.log('Stored event gone for', dateStr, '— creating new');
             state.roster[dateStr].gcalEventId = null;
-            const eid = await findExistingGcalEvent(dateStr, evt.summary);
-            result = eid
-              ? await writeEvent('PATCH', '/' + eid, evt)
-              : await writeEvent('POST', '', evt);
+            result = await writeEvent('POST', '', evt);
           } else {
             throw e;
           }
         }
       } else {
-        // No stored event ID. Search safely for an existing match (e.g. if localStorage
-        // was cleared), then create new if nothing found. The safe search will NEVER
-        // match personal calendar events.
-        const eid = await findExistingGcalEvent(dateStr, evt.summary);
-        if (eid) {
-          console.log('Found existing event for', dateStr, '— updating');
-          result = await writeEvent('PATCH', '/' + eid, evt);
-        } else {
-          result = await writeEvent('POST', '', evt);
-        }
+        // No stored ID — POST a new event directly.
+        // No pre-search: extra API calls per shift flood the rate limit and
+        // have caused false matches against personal calendar events in the past.
+        result = await writeEvent('POST', '', evt);
       }
 
       if (result?.id) state.roster[dateStr].gcalEventId = result.id;
       ok++;
     } catch(e) {
-      if (e.message==='TOKEN_EXPIRED') { tokenExpired=true; break; }
-      console.error('Sync failed', dateStr, e.message);
+      if (e.message === 'TOKEN_EXPIRED') { tokenExpired = true; break; }
+      console.error('Sync failed for', dateStr, '—', e.message);
       failures.push({ date: dateStr, reason: e.message });
       failed++;
     }
 
-    // Update progress bar after each completed item
-    const pctAfter = Math.round(((i+1) / dateKeys.length) * 100);
-    const pfAfter  = document.getElementById('syncProgressFill');
-    if (pfAfter) pfAfter.style.width = pctAfter + '%';
+    // Update progress after each completed item
+    const pfAfter = document.getElementById('syncProgressFill');
+    if (pfAfter) pfAfter.style.width = Math.round(((i + 1) / dateKeys.length) * 100) + '%';
 
-    // 250ms between requests to stay well inside GCal API rate limits
-    if (i < dateKeys.length-1) await new Promise(r => setTimeout(r, 250));
+    // 300ms between writes — stays comfortably within GCal API rate limits
+    if (i < dateKeys.length - 1) await delay(300);
   }
-  return {ok,failed,tokenExpired,failures};
+
+  return { ok, failed, tokenExpired, failures };
 }
 
+// Simple delay helper used throughout sync
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function deleteGcalEvent(eventId) {
-  return gcalRequest('DELETE','/'+eventId,null);
+  try {
+    return await gcalRequest('DELETE', '/' + eventId, null);
+  } catch(e) {
+    // Ignore 404 — event already deleted from GCal
+    if (e.message === 'EVENT_NOT_FOUND') return null;
+    throw e;
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -2237,14 +2239,55 @@ async function doSync() {
   const syncCloseBtn = document.querySelector('#syncModal .btn-icon');
   if (syncCloseBtn) syncCloseBtn.disabled = true;
 
-  // Pre-sync: warn about entries with deleted shift types that will be silently skipped
+  // Pre-sync: warn about entries with deleted shift types
   const broken = keys.filter(k => !state.shiftTypes.find(s => s.id === state.roster[k]?.shiftTypeId));
   if (broken.length) {
     toast(`${broken.length} entr${broken.length!==1?'ies':'y'} skipped — shift type was deleted`, 'warn');
   }
 
-  // Pre-sync: ensure we have the live GCal colour palette so colorIds are correct
+  // Pre-sync: fetch live colour palette if not already cached
   if (state.gcalEventColors.length === 0) await fetchGcalEventColors();
+
+  // Pre-flight check: make a simple authenticated request to verify API access
+  // before committing to a long sync. Catches expired tokens and API errors early.
+  try {
+    const calId   = encodeURIComponent(state.gcalCalendarId || 'primary');
+    const testUrl = `https://www.googleapis.com/calendar/v3/calendars/${calId}`;
+    const testRes = await fetch(testUrl, {
+      headers: { 'Authorization': 'Bearer ' + state.accessToken }
+    });
+    if (testRes.status === 401) {
+      state.accessToken = null; state.tokenExpiry = null;
+      updateGcalStatusUI();
+      closeSyncModal();
+      toast('Google session expired — please reconnect in Settings', 'error');
+      _syncInProgress = false;
+      const syncCloseBtnPF = document.querySelector('#syncModal .btn-icon');
+      if (syncCloseBtnPF) syncCloseBtnPF.disabled = false;
+      return;
+    }
+    if (!testRes.ok) {
+      const errData = await testRes.json().catch(() => ({}));
+      const msg = errData.error?.message || `HTTP ${testRes.status}`;
+      closeSyncModal();
+      toast('Google Calendar API error: ' + msg, 'error');
+      _syncInProgress = false;
+      const syncCloseBtnPF2 = document.querySelector('#syncModal .btn-icon');
+      if (syncCloseBtnPF2) syncCloseBtnPF2.disabled = false;
+      return;
+    }
+    // Update status to show what calendar we're syncing to
+    const calData = await testRes.json().catch(() => ({}));
+    const ps = document.getElementById('syncProgressStatus');
+    if (ps) ps.textContent = `Syncing to "${calData.summary || 'primary'}"…`;
+  } catch(netErr) {
+    closeSyncModal();
+    toast('Network error — check your connection', 'error');
+    _syncInProgress = false;
+    const syncCloseBtnPF3 = document.querySelector('#syncModal .btn-icon');
+    if (syncCloseBtnPF3) syncCloseBtnPF3.disabled = false;
+    return;
+  }
 
   try {
     const {ok,failed,tokenExpired,failures}=await syncEntries(keys);
